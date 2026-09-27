@@ -111,6 +111,7 @@ jar {
                 'MixinConfigs': [
                         "mixins.${project.mod_id}.json",
                         "mixins.${project.mod_id}.oreveins.json",
+                        "mixins.${project.mod_id}.infinitylib.json",
                 ].join(',')
         )
     }

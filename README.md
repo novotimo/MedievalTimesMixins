@@ -252,6 +252,28 @@ That prints the `LocalVariableTable` with slot numbers and names, which beats co
 by hand. If the table is absent the class was built without `-g` and the slots have to be inferred
 from the source, in which case verify against the bytecode before trusting it.
 
+## Not everything has to be a mixin
+
+`reobfJar` reobfuscates the **whole jar**, not just the mixins, so an ordinary class in this repo can
+extend a vanilla class and be written in MCP names like any normal 1.12.2 mod.
+`structure/BetterMineshaftStart` does exactly that: it subclasses `StructureMineshaftStart`, overrides
+`generateStructure` and touches `components`, `minY`, `getBoundingBox`, `addComponentParts` and
+`intersectsWith`, and every one of those is rewritten to its `func_`/`field_` name in
+`build/libs/mtmixins-0.1.0.jar`. Confirm it the same way as an injection:
+
+```
+javap -p -c build/libs/mtmixins-0.1.0.jar-extracted/.../BetterMineshaftStart.class | grep '// Field'
+```
+
+Dev jar shows `components`, production jar shows `field_75075_a`. If you ever see an MCP name survive
+into the production jar, the override is not overriding anything and the field access will throw
+`NoSuchFieldError` at runtime.
+
+Worth knowing because sometimes the right fix is a real class rather than an injection. When a mod
+registers a class that vanilla has to reflectively instantiate and that class cannot be instantiated,
+no injector fixes it &mdash; Mixin cannot add a constructor to a target. Supplying a class that *can*
+be constructed, and intercepting the one place that constructs it, is shorter and safer.
+
 ## Verifying an injection landed
 
 `-Dmixin.debug.export=true` is already on for the dev runs, so every transformed class is

@@ -11,6 +11,7 @@
   "mixins": [
     "armourers.MixinAddonCustomNPCS",
     "minefantasy.MixinCraftingManagerRoast",
+    "vanilla.MixinMapGenStructure",
     "vanilla.MixinEntityItem"
   ],
   "client": [],
