@@ -13,5 +13,7 @@
     "vanilla.MixinEntityItem"
   ],
   "client": [],
-  "server": []
+  "server": [
+    "ancientwarfare.MixinAmmo"
+  ]
 }
