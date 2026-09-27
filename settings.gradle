@@ -1,0 +1,21 @@
+pluginManagement {
+    repositories {
+        maven {
+            name = 'GTNH Maven'
+            url = 'https://nexus.gtnewhorizons.com/repository/public/'
+            mavenContent {
+                includeGroup 'com.gtnewhorizons'
+                includeGroup 'com.gtnewhorizons.retrofuturagradle'
+            }
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+plugins {
+    // Lets Gradle fetch the Java 8 toolchain itself instead of you installing one.
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'MedievalTimesMixins'

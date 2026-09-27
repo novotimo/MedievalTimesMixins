@@ -1,0 +1,111 @@
+plugins {
+    id 'java'
+    id 'idea'
+    // RetroFuturaGradle: a maintained reimplementation of ForgeGradle for 1.7.10 / 1.12.2.
+    // The original ForgeGradle 2.3 only runs on Gradle 4.x + Java 8, which is why nobody
+    // uses it any more. https://github.com/GTNewHorizons/RetroFuturaGradle
+    id 'com.gtnewhorizons.retrofuturagradle' version '2.0.4'
+}
+
+group = project.mod_group
+version = project.mod_version
+base.archivesName.set(project.mod_id as String)
+
+java {
+    toolchain {
+        // Prod runs Temurin 1.8.0_504. Compile to 8 regardless of what runs Gradle.
+        languageVersion = JavaLanguageVersion.of(8)
+        vendor = JvmVendorSpec.AZUL
+    }
+}
+
+minecraft {
+    mcVersion.set('1.12.2')
+
+    // stable_39 is the last MCP mapping set published for 1.12.2 and what every
+    // 1.12.2 mod is built against. Do not change it: the refmap depends on it.
+    mcpMappingChannel.set('stable')
+    mcpMappingVersion.set('39')
+
+    username.set('Developer')
+
+    extraRunJvmArguments.addAll([
+            // Fail loudly in dev if an @Implements/interface mixin is wrong.
+            '-Dmixin.checks.interfaces=true',
+            // Dumps every transformed class to run/.mixin.out so you can javap the
+            // result and confirm an injection actually landed where you meant.
+            '-Dmixin.debug.export=true',
+    ])
+}
+
+repositories {
+    maven {
+        name = 'CleanroomMC'
+        url = 'https://maven.cleanroommc.com'
+    }
+    maven {
+        // CurseMaven resolves anything with a CurseForge project page, so most mods
+        // you need to compile against can be declared as a normal dependency.
+        // Usage: compileOnly 'curse.maven:some-mod-<projectId>:<fileId>'
+        name = 'CurseMaven'
+        url = 'https://cursemaven.com'
+        content { includeGroup 'curse.maven' }
+    }
+    // Drop jars here for mods that are on no maven at all (BuycraftX, Holograms, ...).
+    // Most of the time you will not need to: see the @Pseudo note in the README.
+    flatDir { dirs 'libs' }
+    mavenCentral()
+}
+
+dependencies {
+    // modUtils.enableMixins wires up the Mixin annotation processor AND tells RFG the
+    // refmap name, so the MCP names you write get mapped to the SRG names present at
+    // runtime. Without it your mixins apply in dev and silently fail in production.
+    String mixin = modUtils.enableMixins(
+            "zone.rong:mixinbooter:${project.mixinbooter_version}",
+            "mixins.${project.mod_id}.refmap.json"
+    )
+    implementation(mixin) { transitive = false }
+    annotationProcessor mixin
+
+    // --- compile-only mod targets -------------------------------------------------
+    // Add mods here only when a mixin needs their real types. A @Pseudo mixin that
+    // refers to the target by string needs nothing.
+    // compileOnly 'curse.maven:oreveins-281216:4642373'
+}
+
+processResources {
+    inputs.property 'mod_id', project.mod_id
+    inputs.property 'mod_name', project.mod_name
+    inputs.property 'mod_version', project.mod_version
+    inputs.property 'mod_description', project.mod_description
+    inputs.property 'mod_authors', project.mod_authors
+
+    filesMatching('mcmod.info') {
+        expand(
+                'mod_id': project.mod_id,
+                'mod_name': project.mod_name,
+                'mod_version': project.mod_version,
+                'mod_description': project.mod_description,
+                'mod_authors': project.mod_authors
+        )
+    }
+}
+
+jar {
+    manifest {
+        attributes(
+                // MixinBooter 11+ reads this straight off the jar manifest. No coremod
+                // plugin and no IEarlyMixinLoader needed any more.
+                'MixinConfigs': "mixins.${project.mod_id}.json"
+        )
+    }
+}
+
+idea {
+    module {
+        downloadJavadoc = true
+        downloadSources = true
+        inheritOutputDirs = true
+    }
+}

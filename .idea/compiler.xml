@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile name="Gradle Imported" enabled="true">
+        <outputRelativeToContentRoot value="true" />
+        <option name="outRefMapFile" value="C:\Users\Timothy\IdeaProjects\MedievalTimesMixins\build\tmp\mixins\mixins.mtmixins.refmap.json" />
+        <option name="outSrgFile" value="C:\Users\Timothy\IdeaProjects\MedievalTimesMixins\build\tmp\mixins\mixins.srg" />
+        <option name="reobfSrgFile" value="C:\Users\Timothy\.gradle\caches\minecraft\de\oceanlabs\mcp\mcp_stable\39\rfg_srgs\mcp-srg.srg" />
+        <processorPath useClasspath="false">
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/zone.rong/mixinbooter/11.17/3ab489a24744d45fd9d9035e4950b547cc6f0c5f/mixinbooter-11.17.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/com.cleanroommc/cleanmix/0.7.2/b8793a2f5b29799853dc4bf070707f91112ea2ed/cleanmix-0.7.2.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/com.cleanroommc/mixinextras-common/0.5.5/5a822b77f347f39bd821c2c4759a22686800e05/mixinextras-common-0.5.5.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/com.google.code.gson/gson/2.8.0/c4ba5371a29ac9b2ad6129b1d39ea38750043eff/gson-2.8.0.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/com.google.guava/guava/21.0/3a3d111be1be1b745edfa7d91678a12d7ed38709/guava-21.0.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.ow2.asm/asm-debug-all/5.2/3354e11e2b34215f06dab629ab88e06aca477c19/asm-debug-all-5.2.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.ow2.asm/asm-commons/9.8/36e4d212970388e5bd2c5180292012502df461bb/asm-commons-9.8.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.ow2.asm/asm-util/9.8/395f1c1f035258511f27bc9b2583d76e4b143f59/asm-util-9.8.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.ow2.asm/asm-analysis/9.8/b9747a320844b6cb1eacd90d8ecfd260a16c01d3/asm-analysis-9.8.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.ow2.asm/asm-tree/9.8/18419ca5b77a2f81097c741e7872e6ab8d2f40d/asm-tree-9.8.jar" />
+          <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.ow2.asm/asm/9.8/dc19ecb3f7889b7860697215cae99c0f9b6f6b4b/asm-9.8.jar" />
+        </processorPath>
+        <module name="MedievalTimesMixins.main" />
+      </profile>
+    </annotationProcessing>
+    <bytecodeTargetLevel target="1.8" />
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="MedievalTimesMixins.main" options="-AreobfSrgFile=C:\Users\Timothy\.gradle\caches\minecraft\de\oceanlabs\mcp\mcp_stable\39\rfg_srgs\mcp-srg.srg -AoutSrgFile=C:\Users\Timothy\IdeaProjects\MedievalTimesMixins\build\tmp\mixins\mixins.srg -AoutRefMapFile=C:\Users\Timothy\IdeaProjects\MedievalTimesMixins\build\tmp\mixins\mixins.mtmixins.refmap.json" />
+    </option>
+  </component>
+</project>
