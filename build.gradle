@@ -69,9 +69,13 @@ dependencies {
     annotationProcessor mixin
 
     // --- compile-only mod targets -------------------------------------------------
-    // Add mods here only when a mixin needs their real types. A @Pseudo mixin that
-    // refers to the target by string needs nothing.
-    // compileOnly 'curse.maven:oreveins-281216:4642373'
+    // Add mods here only when a mixin needs their real types. A @Pseudo mixin that refers to its
+    // target by string needs nothing, so most do not appear here.
+    //
+    // Realistic Ore Veins (MIT). Needed by mixin/oreveins so it can call IVein.getPos(),
+    // IVein.inRange(int, int) and IVeinType.getChunkRadius(). compileOnly, so nothing ships.
+    // Verified byte-identical to the jar running on the server.
+    compileOnly 'curse.maven:realistic-ore-veins-296887:2828147'
 }
 
 processResources {
@@ -97,7 +101,17 @@ jar {
         attributes(
                 // MixinBooter 11+ reads this straight off the jar manifest. No coremod
                 // plugin and no IEarlyMixinLoader needed any more.
-                'MixinConfigs': "mixins.${project.mod_id}.json"
+                //
+                // Comma-separated: Mixin splits this value on ',' (MixinPlatformAgentDefault)
+                // and so does MixinBooter's own ModDiscoverer. Every config listed here can be
+                // switched off individually from config/mixinbooter.cfg, because that setting
+                // blacklists by config *file name* and nothing finer. So each group of mixins we
+                // might want to A/B test on a live server gets its own config file. See the
+                // "Turning one group off without rebuilding" section of the README.
+                'MixinConfigs': [
+                        "mixins.${project.mod_id}.json",
+                        "mixins.${project.mod_id}.oreveins.json",
+                ].join(',')
         )
     }
 }

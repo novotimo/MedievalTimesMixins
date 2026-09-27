@@ -10,10 +10,14 @@
   },
   "mixins": [
     "armourers.MixinAddonCustomNPCS",
+    "minefantasy.MixinCraftingManagerRoast",
     "vanilla.MixinEntityItem"
   ],
   "client": [],
   "server": [
-    "ancientwarfare.MixinAmmo"
+    "ancientwarfare.MixinAmmo",
+    "holograms.MixinHologramLine",
+    "votifier.MixinCommandVoteClaim",
+    "votifier.MixinRewardStoreWorldSavedData"
   ]
 }
