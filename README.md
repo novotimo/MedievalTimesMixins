@@ -103,6 +103,71 @@ compileOnly 'curse.maven:oreveins-281216:4642373'
 
 Otherwise drop the jar in `libs/` (gitignored) and use `compileOnly name: 'the-jar-name'`.
 
+## The invoke-owner trap
+
+This one already cost a boot failure, so it goes first.
+
+For an `@At(value = "INVOKE")` target, the owner in the string must be the owner **in the
+bytecode**, which is not necessarily the class that declares the method. javac emits the
+*qualifying type* of the receiver. So for `this.pushOutOfBlocks(...)` inside `EntityItem`,
+where `pushOutOfBlocks` is declared on `Entity`, the constant pool holds:
+
+```
+#174 = Methodref // net/minecraft/entity/item/EntityItem.func_145771_j:(DDD)Z
+```
+
+Targeting `Lnet/minecraft/entity/Entity;pushOutOfBlocks(DDD)Z` matches nothing, and the
+failure mode is ugly: the mixin *applies*, then the injection check throws at boot with
+
+```
+failed injection check, (0/1) succeeded. Scanned 0 target(s).
+```
+
+which reads like a refmap problem and is not one. Before writing an INVOKE target, read the
+real owner out of `build/rfg/srg_merged_minecraft.jar`:
+
+```bash
+unzip -o -j build/rfg/srg_merged_minecraft.jar net/minecraft/entity/item/EntityItem.class -d /tmp
+javap -v -p /tmp/EntityItem.class | grep -A1 "Methodref.*func_145771_j"
+```
+
+That jar is SRG-named original Mojang bytecode, i.e. exactly what the production server
+loads. `mcp_patched_minecraft-sources.jar` in the same folder is the readable source.
+
+Note `javap -c` omits the owner when it equals the current class, so a bare
+`invokevirtual // Method func_145771_j:(DDD)Z` means the owner **is** the current class.
+Resolve the constant pool entry rather than trusting the disassembly line.
+
+Once the owner is right, a second check bites: **the receiver parameter must be typed to
+match the invoke owner.** With owner `EntityItem`, a handler declaring `Entity self` is
+rejected at apply time:
+
+```
+Found unexpected argument type net.minecraft.entity.Entity at index 0,
+expected net.minecraft.entity.item.EntityItem
+```
+
+Same underlying fact, second symptom. Type the receiver as the owner class, not the
+declaring class, even when every field you read off it is inherited.
+
+## A failed injection crashes the server
+
+`mixins.mtmixins.json` sets `injectors.defaultRequire: 1`, so an injection that matches
+nothing is fatal at boot &mdash; which is what happened the first time. That is the right
+default: the alternative is a patch silently not applying and you believing it is live.
+
+The escape hatch is MixinBooter 11's `config/mixinbooter.cfg`, which can blacklist a mixin
+config without repackaging the jar. If a mod update moves a call site out from under a
+mixin, blacklist that config to get the server up, then fix the target. Worth knowing
+*before* you need it at 2am.
+
+## The @Mod class needs a public no-arg constructor
+
+FML constructs it reflectively with `Class.newInstance()` in `ILanguageAdapter$JavaAdapter`.
+Giving it a private constructor because "nobody should instantiate this" fails mod loading
+with `IllegalAccessException: ... can not access a member of ... with modifiers "private"`.
+The class can still be `final`.
+
 ## Verifying an injection landed
 
 `-Dmixin.debug.export=true` is already on for the dev runs, so every transformed class is

@@ -2,7 +2,6 @@ package com.novotimo.mtmixins.mixin.vanilla;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityItem;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -42,17 +41,30 @@ public abstract class MixinEntityItem {
      */
     @WrapOperation(
             method = "onUpdate",
-            at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/Entity;pushOutOfBlocks(DDD)Z")
+            // The owner here is EntityItem, NOT Entity, even though pushOutOfBlocks is
+            // declared on Entity. javac emits the *qualifying type* of the receiver as the
+            // invoke owner, and the receiver is `this` inside EntityItem. Getting this wrong
+            // is silent: Mixin scans zero call sites and the injection check fails at boot
+            // with "Scanned 0 target(s)". Verified against the constant pool of the SRG jar:
+            //   #174 = Methodref // net/minecraft/entity/item/EntityItem.func_145771_j:(DDD)Z
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/item/EntityItem;pushOutOfBlocks(DDD)Z")
     )
-    private boolean mtmixins$throttlePushOutOfBlocks(Entity self, double x, double y, double z,
+    // The receiver parameter must be typed to match the INVOKE owner above, so EntityItem
+    // and not Entity, even though every field read below is inherited from Entity. Mismatch
+    // is rejected at apply time with "unexpected argument type ... at index 0".
+    private boolean mtmixins$throttlePushOutOfBlocks(EntityItem self, double x, double y, double z,
                                                      Operation<Boolean> original) {
-        // Vanilla applies drag multiplicatively, so motion decays towards zero but never
-        // reaches it. An exact == 0 test would never fire.
-        final double speedSq = self.motionX * self.motionX
-                + self.motionY * self.motionY
+        // Horizontal motion only, deliberately. onUpdate applies gravity BEFORE this call,
+        // so a resting item always has motionY of about -0.04 here (move() cancels it
+        // against the ground afterwards). Including motionY in the test makes speedSq
+        // ~0.0016 and the throttle below never fires at all.
+        //
+        // Drag is multiplicative, so horizontal motion decays towards zero without ever
+        // reaching it; an exact == 0 test would also never fire.
+        final double horizontalSq = self.motionX * self.motionX
                 + self.motionZ * self.motionZ;
 
-        if (self.onGround && speedSq < 1.0E-6D) {
+        if (self.onGround && horizontalSq < 1.0E-6D) {
             if (this.mtmixins$restTicks++ % 4 != 0) {
                 // noClip is whatever the last real call set it to, which for a resting
                 // item is still correct.

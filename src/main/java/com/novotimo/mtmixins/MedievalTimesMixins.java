@@ -27,6 +27,10 @@ public final class MedievalTimesMixins {
 
     public static final Logger LOG = LogManager.getLogger(NAME);
 
-    private MedievalTimesMixins() {
+    // No private constructor here, tempting as it is. FML constructs the @Mod class
+    // reflectively via Class.newInstance() in ILanguageAdapter$JavaAdapter, so it needs an
+    // accessible no-arg constructor or mod loading dies with:
+    //   IllegalAccessException: ... can not access a member of ... with modifiers "private"
+    public MedievalTimesMixins() {
     }
 }
