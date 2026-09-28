@@ -14,7 +14,9 @@
     "vanilla.MixinMapGenStructure",
     "vanilla.MixinEntityItem"
   ],
-  "client": [],
+  "client": [
+    "jjcoa.MixinVersionChecker"
+  ],
   "server": [
     "ancientwarfare.MixinAmmo",
     "holograms.MixinHologramLine",
