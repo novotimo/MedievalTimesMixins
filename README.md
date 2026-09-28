@@ -252,6 +252,29 @@ That prints the `LocalVariableTable` with slot numbers and names, which beats co
 by hand. If the table is absent the class was built without `-g` and the slots have to be inferred
 from the source, in which case verify against the bytecode before trusting it.
 
+## Check where the offset already lives before "fixing" worldgen
+
+MineFantasy's ore generator seeds veins at `chunkX * 16 + rand.nextInt(16)` with no `+ 8`, which looks
+exactly like the classic cascading-worldgen bug. It is not. `WorldGenMinable.generate` applies the
+offset itself:
+
+```java
+double d0 = (double)((float)(position.getX() + 8) + MathHelper.sin(f) * numberOfBlocks / 8.0F);
+```
+
+and vanilla's own `BiomeDecorator.genStandardOre1` passes `chunkPos.add(random.nextInt(16), y,
+random.nextInt(16))` with no offset for exactly that reason. MFR was already correct.
+
+Adding a second `+ 8` moved every vein's centre into the neighbouring chunk and its spread into the
+chunk past that, taking MineFantasy from **0 cascading-worldgen events to 488** over the same 1,257
+chunks. The fix was reverted.
+
+The lesson is narrow and worth keeping: in 1.12.2 the populate offset is applied by the
+`WorldGenerator` being invoked, not by the caller. Before concluding a mod forgot it, read the
+generator it hands the position to &mdash; `WorldGenMinable`, `WorldGenLiquids` and friends each have
+their own convention. And before shipping a worldgen change, A/B the cascade count; it is one grep and
+it is the only thing that actually settles it.
+
 ## Not everything has to be a mixin
 
 `reobfJar` reobfuscates the **whole jar**, not just the mixins, so an ordinary class in this repo can
