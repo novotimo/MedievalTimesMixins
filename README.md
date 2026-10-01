@@ -239,6 +239,42 @@ Check per method, not per class. In `RewardStoreWorldSavedData`, `readFromNBT` i
 the mod's own interface and must be left alone. `javap -p` on the deployed class tells you which is
 which at a glance: anything printed as `func_…` needs the dual name.
 
+## A mixin that *adds* a vanilla method must use the SRG name
+
+The section above is about targeting an inherited vanilla method. Adding one is a different trap
+with the opposite answer.
+
+The case this came from is gone from the repo &mdash; a mixin that supplied
+`ICommand.getUsage(ICommandSender)` to a mod class that never implemented it, which broke `/help`
+server-wide. That is now fixed at source in Qourte's Civilizations, where javac refuses a concrete
+`CommandBase` subclass missing the method, so the bug cannot come back. The mapping trap is worth
+keeping written down regardless, because the next mixin that *adds* a vanilla method will hit it.
+
+The house rule is to write MCP names and let `reobfJar` map the whole jar, which is how
+`BetterMineshaftStart` gets away with overriding `StructureMineshaftStart` in plain MCP. That rule
+does not hold when adding a method.
+
+Reobfuscation decides what to rename by walking the class hierarchy: a method is mapped when its
+declaring class inherits it from something mapped. `BetterMineshaftStart` extends a vanilla class, so
+the link exists. A mixin class extends `Object` and implements nothing — the link to `ICommand` is
+created by Mixin at *apply* time, long after reobfuscation has run. A method written as `getUsage`
+therefore ships as `getUsage`, fills no interface slot, and fixes nothing.
+
+So write the SRG name directly:
+
+```java
+@Dynamic("ICommand.getUsage(ICommandSender)")
+public String func_71518_a(ICommandSender sender) { ... }
+```
+
+`func_71518_a` is not an MCP name, so reobfuscation has nothing to map and passes it through
+untouched. That is true whether or not the hierarchy reasoning above is exactly right, which is why
+it is the better choice: it is correct without needing a build to confirm it.
+
+The rule of thumb: **targeting** an inherited vanilla method needs both names, because Mixin resolves
+it at apply time in either environment. **Adding** one needs the SRG name only, because nothing
+resolves it — the JVM matches the slot by raw name and descriptor.
+
 ## Addressing locals with @Local
 
 `@Local(index = N)` is safer than `@Local(ordinal = N)` when you know the slot, and you can read the

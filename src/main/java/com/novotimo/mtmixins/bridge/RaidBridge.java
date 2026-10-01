@@ -23,7 +23,26 @@ import java.lang.reflect.Method;
  */
 public final class RaidBridge {
 
-    private static final String HOOKS = "com.townyforge.compat.RaidPatchHooks";
+    /**
+     * Both names the hooks class has had, newest first.
+     *
+     * <p>TownyForge was decompiled into a real source project (Qourte's Civilizations) and its
+     * package moved from {@code com.townyforge} to {@code me.qourtenay.Civilizations}. A single
+     * hard-coded name would have made this bridge fail <i>open</i> after that deploy: no error,
+     * no crash, just AncientWarfare quietly behaving as unpatched. The visible symptom would have
+     * been raid terrain damage no longer being recorded, discovered only when a raid ended and
+     * restoration put nothing back.
+     *
+     * <p>Trying both also means the two jars can be deployed in either order, and a rollback of
+     * either one still works.
+     */
+    private static final String[] HOOKS_NAMES = {
+            "me.qourtenay.Civilizations.compat.RaidPatchHooks",
+            "com.townyforge.compat.RaidPatchHooks",
+    };
+
+    /** Whichever of {@link #HOOKS_NAMES} resolved, for log messages. */
+    private static final String HOOKS;
 
     private static final Method BEFORE_AW_BREAK;
     private static final Method FINISH_AW_DIRECT_BREAK;
@@ -36,22 +55,39 @@ public final class RaidBridge {
         Method before = null;
         Method finish = null;
         Method capture = null;
-        try {
-            Class<?> hooks = Class.forName(HOOKS);
-            before = hooks.getMethod("beforeAwBreak", Object.class, Object.class);
-            finish = hooks.getMethod("finishAwDirectBreak");
-            capture = hooks.getMethod("captureRaidTerrainMutation", Object.class, Object.class);
-            MedievalTimesMixins.LOG.info("TownyForge raid hooks resolved; AncientWarfare raid guard is active.");
-        } catch (ClassNotFoundException absent) {
-            MedievalTimesMixins.LOG.info(
-                    "TownyForge not present ({}); AncientWarfare raid hooks are inert and AW behaves as unpatched.",
-                    HOOKS);
-        } catch (Throwable changed) {
-            MedievalTimesMixins.LOG.error(
-                    "{} is present but does not have the expected methods. The AncientWarfare raid guard is "
-                            + "DISABLED - cannons will damage claimed land. Check whether TownyForge changed.",
-                    HOOKS, changed);
+        String resolved = null;
+
+        Class<?> hooks = null;
+        for (String candidate : HOOKS_NAMES) {
+            try {
+                hooks = Class.forName(candidate);
+                resolved = candidate;
+                break;
+            } catch (ClassNotFoundException absent) {
+                // Try the next name. Absence of all of them is reported below.
+            }
         }
+
+        if (hooks == null) {
+            MedievalTimesMixins.LOG.info(
+                    "Civilizations/TownyForge not present (tried {}); AncientWarfare raid hooks are inert "
+                            + "and AW behaves as unpatched.", java.util.Arrays.toString(HOOKS_NAMES));
+        } else {
+            try {
+                before = hooks.getMethod("beforeAwBreak", Object.class, Object.class);
+                finish = hooks.getMethod("finishAwDirectBreak");
+                capture = hooks.getMethod("captureRaidTerrainMutation", Object.class, Object.class);
+                MedievalTimesMixins.LOG.info(
+                        "Raid hooks resolved from {}; AncientWarfare raid guard is active.", resolved);
+            } catch (Throwable changed) {
+                MedievalTimesMixins.LOG.error(
+                        "{} is present but does not have the expected methods. The AncientWarfare raid guard is "
+                                + "DISABLED - cannons will damage claimed land. Check whether the mod changed.",
+                        resolved, changed);
+            }
+        }
+
+        HOOKS = resolved;
         BEFORE_AW_BREAK = before;
         FINISH_AW_DIRECT_BREAK = finish;
         CAPTURE_RAID_TERRAIN_MUTATION = capture;
@@ -98,7 +134,7 @@ public final class RaidBridge {
     private static void fail(String which, Throwable t) {
         broken = true;
         MedievalTimesMixins.LOG.error(
-                "RaidPatchHooks.{} threw. Disabling all TownyForge raid hooks for this session; "
-                        + "AncientWarfare will behave as unpatched.", which, t);
+                "{}.{} threw. Disabling all raid hooks for this session; "
+                        + "AncientWarfare will behave as unpatched.", HOOKS, which, t);
     }
 }
