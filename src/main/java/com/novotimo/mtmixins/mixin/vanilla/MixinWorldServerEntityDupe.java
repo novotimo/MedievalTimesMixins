@@ -2,7 +2,9 @@ package com.novotimo.mtmixins.mixin.vanilla;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -128,6 +130,19 @@ public abstract class MixinWorldServerEntityDupe {
         }
         WorldServer self = (WorldServer) (Object) this;
 
+        // Entities seen earlier in THIS batch, which getEntityFromUuid cannot tell us about.
+        //
+        // This injects at the head of loadEntities, before any of the chunk's entities have been
+        // added to the world, so getEntityFromUuid only ever knows about entities that came from a
+        // chunk loaded earlier. That made the fix blind to the case that matters most here: a single
+        // chunk whose own list holds many copies of one UUID. One chunk on this server held 83 copies
+        // of the same dragon - damage from the pre-B16 horn, which released a dragon carrying the
+        // stored UUID every time it was used - and every one of them fell through the live-entity
+        // check and was left alone. They sat in the chunk list refused by canAddEntity, never ticking,
+        // which is why their positions were frozen at exact block centres, and /tellme counted all 83
+        // because it reads chunk lists rather than the world's UUID map.
+        Map<UUID, Entity> seenInBatch = new HashMap<UUID, Entity>();
+
         // Copy first: the delete branch touches the chunk entity lists this may be backed by.
         for (Entity incoming : new ArrayList<Entity>(entityCollection)) {
             if (incoming == null || incoming.isDead) {
@@ -138,7 +153,14 @@ public abstract class MixinWorldServerEntityDupe {
                 continue;
             }
             Entity live = self.getEntityFromUuid(uuid);
-            if (live == null || live == incoming) {
+            if (live == null) {
+                live = seenInBatch.get(uuid);
+            }
+            if (live == null) {
+                seenInBatch.put(uuid, incoming);
+                continue;
+            }
+            if (live == incoming) {
                 continue;
             }
 
@@ -163,6 +185,12 @@ public abstract class MixinWorldServerEntityDupe {
                         .getLoadedChunk(incoming.chunkCoordX, incoming.chunkCoordZ);
                 if (chunk != null) {
                     chunk.markDirty();
+                }
+                // Keep the batch map pointing at something that still holds the original UUID, so a
+                // third copy is still measured against the first rather than against an entity that
+                // has just been given a different identity.
+                if (!seenInBatch.containsKey(uuid)) {
+                    seenInBatch.put(uuid, live);
                 }
                 mtmixins$reidentified++;
                 mtmixins$report(incoming, uuid, self, "gave a fresh UUID to");
