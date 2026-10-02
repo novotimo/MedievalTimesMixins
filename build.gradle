@@ -115,6 +115,7 @@ jar {
                         "mixins.${project.mod_id}.cascade.json",
                         "mixins.${project.mod_id}.entitydupe.json",
                         "mixins.${project.mod_id}.dragonhorn.json",
+                        "mixins.${project.mod_id}.profilecache.json",
                 ].join(',')
         )
     }
