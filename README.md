@@ -333,6 +333,28 @@ registers a class that vanilla has to reflectively instantiate and that class ca
 no injector fixes it &mdash; Mixin cannot add a constructor to a target. Supplying a class that *can*
 be constructed, and intercepting the one place that constructs it, is shorter and safer.
 
+## Line numbers in a vanilla stack trace can be someone else's
+
+`AnvilChunkLoader` is mixed into by Alfheim (`AnvilChunkLoaderMixin`, injecting at HEAD and
+RETURN of `writeChunkToNBT`, `saveChunk` and `readChunkFromNBT` to carry its neighbour light
+data) and ASM-transformed by NotEnoughIDs (`TransformerGroupAnvilChunkLoader`, for extended
+block ids). Both shift the line numbering, so
+
+```
+at AnvilChunkLoader.func_75820_a(AnvilChunkLoader.java:356)
+```
+
+does not point at line 356 of vanilla source and trying to read it that way wastes time. Find
+the fault from the *frames* and from the bytecode instead. For the B19 case the giveaway was
+`com.google.common.collect.Iterators$3.next` over an `ArrayList$Itr`: that is Guava's
+`unmodifiableIterator` wrapper, which is what `ClassInheritanceMultiMap.iterator()` returns over
+its backing list - so the loop had to be the entity loop, whatever line it claimed to be on.
+
+Confirming it against the obfuscated server jar took one `javap`: in `aye.class`, `axw.t()` is
+`Chunk.getEntityLists()` returning `[Lqx;`, `qx` is `ClassInheritanceMultiMap`, and offset 361 is
+the only `invokevirtual qx.iterator()` in the class. That uniqueness is what makes the `@At`
+target safe.
+
 ## Verifying an injection landed
 
 `-Dmixin.debug.export=true` is already on for the dev runs, so every transformed class is

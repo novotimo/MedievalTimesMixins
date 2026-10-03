@@ -117,6 +117,7 @@ jar {
                         "mixins.${project.mod_id}.dragonhorn.json",
                         "mixins.${project.mod_id}.profilecache.json",
                         "mixins.${project.mod_id}.collisions.json",
+                        "mixins.${project.mod_id}.chunksave.json",
                 ].join(',')
         )
     }
