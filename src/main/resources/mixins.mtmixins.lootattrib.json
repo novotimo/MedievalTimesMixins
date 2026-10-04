@@ -1,15 +1,15 @@
 {
-  "required": true,
+  "required": false,
   "minVersion": "0.8",
   "package": "com.novotimo.mtmixins.mixin",
   "refmap": "mixins.mtmixins.refmap.json",
   "target": "@env(DEFAULT)",
   "compatibilityLevel": "JAVA_8",
   "injectors": {
-    "defaultRequire": 1
+    "defaultRequire": 0
   },
   "mixins": [
-    "vanilla.AccessorWorldUnloadQueue",
-    "vanilla.MixinWorldServerEntityDupe"
+    "vanilla.MixinLootTableAttribution",
+    "vanilla.MixinLootTableManagerName"
   ]
 }

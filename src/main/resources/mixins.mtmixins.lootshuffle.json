@@ -9,7 +9,6 @@
     "defaultRequire": 1
   },
   "mixins": [
-    "vanilla.AccessorWorldUnloadQueue",
-    "vanilla.MixinWorldServerEntityDupe"
+    "vanilla.MixinLootTableShuffle"
   ]
 }

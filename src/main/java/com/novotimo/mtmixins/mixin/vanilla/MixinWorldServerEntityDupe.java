@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -106,6 +107,111 @@ public abstract class MixinWorldServerEntityDupe {
     @Unique
     private static final double SAFE_RANGE = 32.0D;
 
+    /**
+     * The same question, asked much more strictly, for entities that a player placed or owns.
+     *
+     * <p>32 blocks was wrong for these and the production logs showed it: between 1 and 3 October
+     * this register deleted 4 CustomNPCs NPCs, 11 AncientWarfare NPCs including two faction traders,
+     * 6 paintings, 6 horses, a skeleton horse, two vehicles and a gate &mdash; 31 things somebody had
+     * put there on purpose.
+     *
+     * <p>The reason 32 blocks fails here is that the type half of the test does no work.
+     * <b>CustomNPCs registers every NPC it creates under the single entity id
+     * {@code customnpcs:customnpc}</b>, so a merchant, a guard and a dialogue NPC are
+     * indistinguishable by type, and "same type and within 32 blocks" is then just "within 32
+     * blocks", which in a town is always true. Six paintings on one wall and six horses in one
+     * stable have the same problem. Worse, these are exactly the entities most likely to hit the
+     * UUID-collision cause rather than the written-twice cause: Paper traced collisions to a shared
+     * {@code Random}, so entities created in the same tick collide with each other &mdash; and
+     * entities created in the same tick are usually standing in the same room.
+     *
+     * <p>At 1 block the test means what it was always supposed to mean: two copies at the same spot
+     * are one entity saved twice, and anything further apart is treated as a distinct entity and
+     * given a fresh UUID instead of being destroyed. That still cleans up the unambiguous case
+     * &mdash; the pair of {@code aw_npc_combat} at identical coordinates on 1 October, for instance
+     * &mdash; while leaving a merchant alone.
+     */
+    @Unique
+    private static final double PLACED_RANGE = 1.0D;
+
+    /**
+     * Entity ids whose copies must not be deleted on a near miss. Prefixes, matched against the
+     * registry name, so {@code ancientwarfarenpc:} covers every faction role at once.
+     *
+     * <p>What belongs here is anything a player placed, owns, or built, and anything whose entity id
+     * is shared across many distinct things. What does not belong here is mobs and transient
+     * entities, which is where almost all of the real duplicate damage was: of the 802 resolutions
+     * in the production window, 568 were falling blocks, items and arrows.
+     */
+    @Unique
+    private static final String[] PLACED_PREFIXES = {
+            "customnpcs:",                      // one entity id for every NPC the mod makes
+            "ancientwarfarenpc:",                // faction traders, soldiers, archers, engineers
+            "ancientwarfarevehicle:",
+            "ancientwarfarestructure:",          // gates
+            "minecraft:painting",
+            "minecraft:item_frame",
+            "minecraft:armor_stand",
+            "minecraft:horse",
+            "minecraft:skeleton_horse",
+            "minecraft:zombie_horse",
+            "minecraft:donkey",
+            "minecraft:mule",
+            "minecraft:llama",
+            "minecraft:boat",
+            "minecraft:minecart",
+            "minecraft:chest_minecart",
+            "minecraft:hopper_minecart",
+            "minecraft:furnace_minecart",
+            "minecraft:tnt_minecart",
+            "minecraft:commandblock_minecart",
+            "minecraft:leash_knot",
+    };
+
+    @Unique
+    private static long mtmixins$protectedKept = 0L;
+
+    @Unique
+    private static long mtmixins$unloadRaces = 0L;
+
+    /**
+     * True when this entity is already on its way out, so an incoming copy of it is itself.
+     *
+     * <p>Reached through {@link AccessorWorldUnloadQueue} rather than a {@code @Shadow}: the field is
+     * declared on {@code World} and shadowing it from a {@code WorldServer} mixin compiles with a
+     * warning and no obfuscation mapping, which binds in a dev run and fails on a real server.
+     */
+    @Unique
+    private static boolean mtmixins$pendingUnload(WorldServer world, Entity live) {
+        List<Entity> queue = ((AccessorWorldUnloadQueue) world).mtmixins$unloadedEntityList();
+        return queue != null && queue.contains(live);
+    }
+
+    /**
+     * True when this entity is a thing somebody placed or owns rather than ambient wildlife.
+     *
+     * <p>Kept as a second line of defence rather than as the fix. The unload-race check above is
+     * what was actually wrong; this narrows the window for anything that slips past it, and costs
+     * nothing but an occasional extra animal. No established fix for MC-101734 has a list like this
+     * &mdash; DEUF only ever regenerates a UUID and never deletes, Paper deletes but downstream of
+     * the check above, and Mojang's own answer in 1.17 was to move entities out of chunk NBT
+     * entirely &mdash; so if this list ever looks like it is doing real work, that is a sign
+     * something upstream of it is wrong again.
+     */
+    @Unique
+    private static boolean mtmixins$isPlaced(ResourceLocation id) {
+        if (id == null) {
+            return true;    // unknown is treated as precious
+        }
+        String s = id.toString();
+        for (String prefix : PLACED_PREFIXES) {
+            if (s.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Unique
     private static final Set<UUID> mtmixins$reported = new HashSet<UUID>();
 
@@ -153,6 +259,58 @@ public abstract class MixinWorldServerEntityDupe {
                 continue;
             }
             Entity live = self.getEntityFromUuid(uuid);
+
+            // THE CHECK THIS REGISTER ORIGINALLY MISSED, AND THE REASON IT DELETED 31 THINGS
+            // PLAYERS HAD PLACED.
+            //
+            // getEntityFromUuid reads entitiesByUuid, and an entity queued for unload STAYS in
+            // that map until World.updateEntities drains unloadedEntityList at the end of the
+            // tick. Chunk loading happens during the tick, before that drain. So when a chunk
+            // unloads and is loaded again in the same tick - which happens constantly, and P-08
+            // shows how many things ask for chunks mid-tick - the copy read back off disk collides
+            // with its own pending-unload self. Same type, same coordinates, distance zero.
+            //
+            // Vanilla handles this explicitly. WorldServer.canAddEntity:
+            //
+            //     if (this.unloadedEntityList.contains(entity)) {
+            //         this.unloadedEntityList.remove(entity);   // cancel the unload
+            //     } else {
+            //         ... "Keeping entity {} that already exists with UUID {}"; return false;
+            //     }
+            //     this.removeEntityDangerously(entity);         // drop the stale copy, keep this one
+            //
+            // and it logs nothing, which is why the production logs showed 188 duplicate UUIDs in
+            // ten days from vanilla and 795 in three days from this register. Those were not
+            // duplicates. They were ordinary chunk churn, and 568 of the 802 were falling blocks
+            // and dropped items - entities with no plausible reason to collide on a UUID at that
+            // rate, which is the tell.
+            //
+            // Paper's SAFE_REGEN does the same same-type-and-32-blocks test this register copied,
+            // but it runs it on the far side of this branch, as part of the entity-add path rather
+            // than ahead of it. Lifting the decision rule without its position is what broke it;
+            // the rule was never the problem.
+            if (live != null && mtmixins$pendingUnload(self, live)) {
+                mtmixins$unloadRaces++;
+                // Logged on its own rather than only inside mtmixins$report, because this branch
+                // returns before any report runs - so a server where EVERY case is an unload race
+                // printed nothing at all, and "it worked" and "it never loaded" looked identical in
+                // the log. First one, then every hundredth, so it stays measurable without
+                // reproducing the spam it replaced.
+                if (mtmixins$unloadRaces == 1L || mtmixins$unloadRaces % 100L == 0L) {
+                    MedievalTimesMixins.LOG.warn(
+                            "Chunk unload race, not a duplicate: {} (UUID {}) at {},{},{} in {} was "
+                                    + "reloaded while its own copy was still queued for unload. "
+                                    + "Left alone. {} of these so far; vanilla handles them and logs "
+                                    + "nothing. Before register B15 was corrected these were being "
+                                    + "deleted. See MC-101734.",
+                            EntityList.getKey(incoming), uuid,
+                            (int) incoming.posX, (int) incoming.posY, (int) incoming.posZ,
+                            self.provider.getDimensionType().getName(),
+                            mtmixins$unloadRaces);
+                }
+                continue;
+            }
+
             if (live == null) {
                 live = seenInBatch.get(uuid);
             }
@@ -210,7 +368,13 @@ public abstract class MixinWorldServerEntityDupe {
         if (a == null || b == null || !a.equals(b)) {
             return false;
         }
-        return live.getDistanceSq(incoming) <= SAFE_RANGE * SAFE_RANGE;
+        double range = (mtmixins$isPlaced(a) || mtmixins$isPlaced(b))
+                ? PLACED_RANGE : SAFE_RANGE;
+        boolean same = live.getDistanceSq(incoming) <= range * range;
+        if (!same && range == PLACED_RANGE) {
+            mtmixins$protectedKept++;
+        }
+        return same;
     }
 
     /** One line per UUID, so a single stuck animal does not reproduce the spam it is fixing. */
@@ -221,10 +385,12 @@ public abstract class MixinWorldServerEntityDupe {
         }
         MedievalTimesMixins.LOG.warn(
                 "Duplicate UUID resolved: {} {} (UUID {}) at {},{},{} in {}. Totals this session: "
-                        + "{} dropped, {} re-identified. See register B15 / MC-101734.",
+                        + "{} dropped, {} re-identified, {} protected by distance, {} unload races skipped. "
+                        + "See register B15 / MC-101734.",
                 what, EntityList.getKey(entity), uuid,
                 (int) entity.posX, (int) entity.posY, (int) entity.posZ,
                 world.provider.getDimensionType().getName(),
-                mtmixins$dropped, mtmixins$reidentified);
+                mtmixins$dropped, mtmixins$reidentified, mtmixins$protectedKept,
+                mtmixins$unloadRaces);
     }
 }
