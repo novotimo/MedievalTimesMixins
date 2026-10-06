@@ -88,11 +88,16 @@ public abstract class MixinLootTableAttribution implements INamedLootTable {
     /**
      * Redirects vanilla's own warn so the line carries the context instead of replacing it with a
      * second line, which keeps the existing log filters and counts working.
+     *
+     * <p>{@code remap = false} on the {@code @At} only: the target is log4j's {@code Logger}, which is
+     * not obfuscated, so the annotation processor has no mapping to find and warns "Unable to locate
+     * method mapping" if asked to look. {@code fillInventory} itself still remaps through the class.
      */
     @Redirect(
             method = "fillInventory",
             at = @At(value = "INVOKE",
-                    target = "Lorg/apache/logging/log4j/Logger;warn(Ljava/lang/String;)V"))
+                    target = "Lorg/apache/logging/log4j/Logger;warn(Ljava/lang/String;)V",
+                    remap = false))
     private void mtmixins$attributeOverfill(Logger logger, String message) {
         String target = mtmixins$target.get();
         StringBuilder where = new StringBuilder();
