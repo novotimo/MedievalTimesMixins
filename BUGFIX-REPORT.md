@@ -14,6 +14,7 @@ jars. Section 10 runs the same before/after check offline.
 ```powershell
 git fetch origin
 git switch claude/tender-edison-ygomlf
+git merge --ff-only origin/claude/tender-edison-ygomlf
 powershell -ExecutionPolicy Bypass -File tools\build-jars.ps1
 ```
 
@@ -102,8 +103,12 @@ is the 0.2.0 fixed build.
    - The cows stay stacked on one spot until they wander off.
    - You walk through a cow without moving it.
    - The log has `Entity pushing capped at 0 per entity per tick, from mtmixins-collisions.properties`.
-     It is written at the first collision, not at startup. If it says `capped at 8`, the file was not
-     read; recreate it with the command above.
+     It is written at the first collision, not at startup.
+   - If the log instead says any of these, stop the server, `cd` to the server folder, and recreate the
+     file with the command above:
+     - `No mtmixins-collisions.properties found`: the file is not in `<server folder>\config\`.
+     - `Entity pushing capped at 8`: the file was found but the key was not read (wrong encoding).
+     - `Could not read mtmixins-collisions.properties`.
 3. Do the same with `-Value 'max-entity-collisions = -1'`. Pushing is vanilla (cows push apart, walking
    shoves them), and the log says `capped at -1`.
 4. Delete the file and restart. The result is the same as step 1.
@@ -156,7 +161,8 @@ seen earlier in the batch are checked next.
    16-block slice.
 3. Run `/forge setdim @p -1 0 100 0`. You are now in the Nether in spectator mode, and you will rejoin
    there.
-4. Run `/save-all`, wait 5 seconds, then `stop`.
+4. Run `/save-all`, wait 5 seconds, then `/stop` (or type `stop` in the server console). Wait until the
+   server has fully stopped before opening NBTExplorer.
 5. In NBTExplorer, open `world\region\r.3.0.mca`.
    - Chunk [29, 0] → Level → Entities: set E1's `UUIDMost` to `7` and `UUIDLeast` to `7`.
    - Chunk [29, 1] → Level → Entities: do the same for E2 and E3.
@@ -177,7 +183,7 @@ seen earlier in the batch are checked next.
    [Medieval Times Mixins]: Chunk unload race, not a duplicate: minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,24 ...
    [net.minecraft.world.WorldServer]: Keeping entity minecraft:armor_stand that already exists with UUID 00000000-0000-0007-0000-000000000007
    ```
-6. Run `/save-all flush`, then `stop`. In NBTExplorer, Chunk [29, 1] → Level → Entities still holds two
+6. Run `/save-all flush`, then `/stop`, and wait for the server to stop. In NBTExplorer, Chunk [29, 1] → Level → Entities still holds two
    armor stands with UUID 7/7.
 
 **Expected (fixed jar, fresh copy, same steps).**
@@ -205,7 +211,10 @@ in order, then retry on a fresh copy:
    - Run steps 3–4.
    - The log shows
      `Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand ... at 2008,80,24 in overworld`
-     and no race line.
+     and no race line for UUID `00000000-0000-0007-0000-000000000007`.
+   - When you arrive in the Overworld, a `Chunk unload race` line for some other entity near the
+     Overworld spawn may appear. An autosave unloaded those spawn-area chunks while the Overworld was
+     empty; they are not part of this test.
 
 ---
 
@@ -223,24 +232,7 @@ still be freed. A lookup from any other world misses.
 **Setup (both jars).**
 1. In the server folder run:
    ```powershell
-   @'
-   {
-     "mtmixins_repro_nether_only": {
-       "type": "cluster",
-       "ore": "minecraft:sponge",
-       "stone": ["minecraft:stone", "minecraft:netherrack", "minecraft:soul_sand", "biomesoplenty:flesh"],
-       "count": 6,
-       "rarity": 1,
-       "min_y": 32,
-       "max_y": 64,
-       "horizontal_size": 16,
-       "vertical_size": 10,
-       "density": 80,
-       "dimensions": [0, -1],
-       "biomes": ["NETHER"]
-     }
-   }
-   '@ | Set-Content -Encoding Ascii -Path config\oreveins\mtmixins_repro.json
+   Set-Content -Encoding Ascii -Path config\oreveins\mtmixins_repro.json -Value '{"mtmixins_repro_nether_only": {"type": "cluster", "ore": "minecraft:sponge", "stone": ["minecraft:stone", "minecraft:netherrack", "minecraft:soul_sand", "biomesoplenty:flesh"], "count": 6, "rarity": 1, "min_y": 32, "max_y": 64, "horizontal_size": 16, "vertical_size": 10, "density": 80, "dimensions": [0, -1], "biomes": ["NETHER"]}}'
    ```
    - The vein is allowed in the Overworld and the Nether, but only in biomes tagged `NETHER`.
    - The Overworld has none, so the vein can never legitimately place a block there.
@@ -250,9 +242,12 @@ still be freed. A lookup from any other world misses.
    before), with no `Unable to open the file` and no error naming `mtmixins_repro_nether_only`. If it
    still says 74, stop: the test cannot show anything.
 3. Have no other players online.
-4. If a world border is configured (the worldborder mod or `/feworldborder`), check that x/z 40016 and
-   48016 are inside it. If not, pick two unexplored values A and B inside it that are multiples of 16.
-   Below, replace 40000 with A, 40016 with A+16, 40008/40023 with A+8/A+23, and likewise for B.
+4. If a world border is configured (the worldborder mod, or `/feworldborder`, which is set separately
+   for each world), check it in **both the Overworld (0) and the Nether (-1)**.
+   - x/z 40000–40031, 48000–48031, 56000–56031 and 64000–64031 must be inside it.
+   - Replace any area that is not with an unexplored multiple of 16 that is inside, in both dimensions.
+   - Below, for each area base N (40000, 48000, 56000, 64000), replace N with its new value, and
+     N+8 / N+16 / N+23 to match.
 
 **Reproduce (baseline jar).**
 1. Run `/forge gen 40000 64 40000 1 -1`. This generates and populates Nether chunk (2500, 2500).
@@ -265,7 +260,8 @@ still be freed. A lookup from any other world misses.
    - It reports **N blocks filled, with N > 0**: sponge in Overworld stone, placed by a vein that
      requires a Nether biome.
    - If it says `No blocks filled`, something else generated chunks between steps 1 and 2. Repeat at
-     another fresh area (56000, then 64000) before concluding anything.
+     another fresh area before concluding anything: 56000 / 56008 / 56016 / 56023, then 64000 / 64008 /
+     64016 / 64023, in the same places as 40000 / 40008 / 40016 / 40023.
 
 **Expected (fixed jar, a different fresh area).**
 ```
@@ -345,7 +341,8 @@ the world"** for both spawners, and there is no freeze.
    - About 20 of the 3000 columns fall in that chunk, and the `isValidBlock` guard (already present at
      baseline) keeps them from loading it.
 2. *Loaded positions still found.*
-   - Set `/difficulty normal` (on Peaceful every lava mob is rejected).
+   - Set `/difficulty normal`. On Peaceful, Lycanites rejects every non-peaceful mob, so only the
+     cephignis could spawn.
    - Stand at a lava lake or the Nether lava sea, with at least 8 still lava source blocks within 32
      blocks.
    - Run `/lm spawner test lava`, up to 5 times. Lycanites lava mobs (cephignis, salamander, ...) spawn
@@ -391,7 +388,9 @@ settings done and `/gamerule doMobLoot` true.
 5. Stop it from the same spot with `/setblock ~2 ~ ~2 minecraft:air`. Restart the server: the name never
    shrinks, so the baseline stays slow until a restart.
 
-**Expected (fixed jar).** Same steps: MSPT stays flat for the whole 10 minutes.
+**Expected (fixed jar).** Same steps: MSPT stays flat for the whole 10 minutes. On the same world, skip
+step 2. The 20 `lr` armor stands from the first run are still there, and summoning 20 more would make
+40 zombies a tick.
 
 **Regression (both jars): real tables are still named.** Section 9's regression shows
 `table minecraft:chests/simple_dungeon`.
@@ -429,29 +428,36 @@ used" counter, which used to be collected but never shown.
    - The same two commands empty and fill the 5-slot hopper.
 
    Fills alternate, so every even-numbered fill is the hopper.
-3. Wait until `Select-String -Path logs\latest.log -Pattern 'over 200 fills'` prints a line (about 5
+3. In the server folder, wait until `Select-String -Path logs\latest.log -Pattern 'over 200 fills'` prints a line (about 5
    seconds at 20 TPS, longer if the server lags). Then stop it from the same spot with
    `/setblock ~1 ~ ~2 minecraft:air`.
-4. Run `Select-String -Path logs\latest.log -Pattern 'over 100 fills'`. It reads
+4. In the server folder, run `Select-String -Path logs\latest.log -Pattern 'over 100 fills'`. It reads
    `Loot fill: N stacks into 5 slots (target was T). Average occupancy over 100 fills: X slots, Y% of capacity. Register B20.`
    - X is about 8, and **Y = 20 × X** (about 160%) give or take 2.
    - That is the running average divided by this one hopper's 5 slots. Above 100% is impossible.
 
-**Expected (fixed jar).** Same steps:
+**Expected (fixed jar).** Same steps, on a fresh flat spot. Or, standing on the old spot, first clear
+the old blocks with `/fill ~1 ~ ~2 ~4 ~ ~4 minecraft:air`; otherwise each `/setblock` says `The block
+couldn't be placed`. The line reads:
 `... into 5 slots ... over 100 fills: X slots, Y% of capacity; 0 fills used every slot. Register B20.`
 - **Y = 6.25 × X** (about 50%) give or take 1.
 - That is 100 fills × X slots used ÷ 1600 slots offered (50 chests × 27 + 50 hoppers × 5).
 
-**If the line says `into 27 slots`, or the fixed jar's Y is not 6.25 × X.** Something else filled loot
-before your contraption. Restart and repeat. If it happens again (something fills loot at every start),
-fix the order from the same spot:
+**If the line says `into 27 slots`.** An odd number of other loot fills came before your contraption,
+so every hundredth fill is the chest. Restart and repeat. If it happens again, fix the order from the
+same spot:
 1. Stop the Repeating block as in step 3.
 2. Run one hopper fill by hand: `/blockdata ~3 ~ ~4 {LootTable:"minecraft:chests/jungle_temple_dispenser"}`,
    then `/replaceitem block ~3 ~ ~4 slot.container.0 minecraft:air`.
 3. Re-run the Repeating block's `/setblock` line.
 4. Read the next `over N00 fills` line that says `into 5 slots`.
-   - Baseline: Y ≈ 20 × X, over 100%.
+   - Baseline: Y = 20 × X (±2), over 100%.
    - Fixed: about 50%.
+
+**If the line says `into 5 slots` but the fixed jar's Y is more than 1 away from 6.25 × X.** An even
+number of other fills came first. The hopper is still every even-numbered fill; only the total slots
+offered changed. Do not do the hand fill, because it would move every `N00` line onto the chest. The
+fixed jar passes if Y is about 50% and under 100%. The baseline is not affected (Y = 20 × X).
 
 **Regression.** Both jars run the same merge and split code, so X is about 8 on both (it varies by
 about ±0.3 between runs). The `N stacks` of a single fill is random and will not match between runs.
@@ -475,7 +481,8 @@ The jar name and `mcmod.info` say 0.2.0 on both jars. Only the `@Mod` version FM
    `... saved with mod mtmixins version 0.1.0 and it is now at version 0.2.0 ...`. That is your log's
    line 2247.
 
-Client view: put the jar in the client's own `mods` folder too. Under Mods → Medieval Times Mixins, the
+Client view: on a client, delete every `mtmixins*.jar` from the client's own `mods` folder and copy in
+the same jar the server is running (switch it each time you switch the server). Under Mods → Medieval Times Mixins, the
 detail pane reads `Version: 0.2.0 (0.1.0)` on the baseline and `Version: 0.2.0 (0.2.0)` on the fixed
 jar. The list column shows 0.2.0 on both.
 
@@ -564,8 +571,9 @@ too.
 2. Run these two commands as a pair, repeatedly (up-arrow twice, Enter):
    `/blockdata ~2 ~ ~2 {LootTable:"minecraft:chests/simple_dungeon"}` and
    `/replaceitem block ~2 ~ ~2 slot.container.0 minecraft:air`.
-3. When a roll yields 6 or more different items, the log shows
-   `Loot genuinely does not fit: 6 distinct stacks for 5 slots ...`, followed by
+3. When a roll yields more different items than the hopper has slots, the log shows
+   `Loot genuinely does not fit: N distinct stacks for 5 slots after merging (was M before). ...`
+   (N is 6 or more), followed by
    `[Medieval Times Mixins]: Tried to over-fill a container -- table minecraft:chests/simple_dungeon | container net.minecraft.tileentity.TileEntityHopper size=5 alreadyUsed=0 | called from ...`
    instead of vanilla's bare line.
 
