@@ -289,32 +289,27 @@ public abstract class MixinWorldServerEntityDupe {
             // but it runs it on the far side of this branch, as part of the entity-add path rather
             // than ahead of it. Lifting the decision rule without its position is what broke it;
             // the rule was never the problem.
-            if (live != null && mtmixins$pendingUnload(self, live)) {
-                mtmixins$unloadRaces++;
-                // Logged on its own rather than only inside mtmixins$report, because this branch
-                // returns before any report runs - so a server where EVERY case is an unload race
-                // printed nothing at all, and "it worked" and "it never loaded" looked identical in
-                // the log. First one, then every hundredth, so it stays measurable without
-                // reproducing the spam it replaced.
-                if (mtmixins$unloadRaces == 1L || mtmixins$unloadRaces % 100L == 0L) {
-                    MedievalTimesMixins.LOG.warn(
-                            "Chunk unload race, not a duplicate: {} (UUID {}) at {},{},{} in {} was "
-                                    + "reloaded while its own copy was still queued for unload. "
-                                    + "Left alone. {} of these so far; vanilla handles them and logs "
-                                    + "nothing. Before register B15 was corrected these were being "
-                                    + "deleted. See MC-101734.",
-                            EntityList.getKey(incoming), uuid,
-                            (int) incoming.posX, (int) incoming.posY, (int) incoming.posZ,
-                            self.provider.getDimensionType().getName(),
-                            mtmixins$unloadRaces);
-                }
-                continue;
+            //
+            // A world copy on its way out is therefore not a rival, but it does not end the check
+            // either. Paper falls back to the copies already seen in this chunk in that case
+            // ("if (other == null || other.dead || unloadQueue.contains(other)) other =
+            // thisChunk.get(uuid)"), and so must this: the first version `continue`d here, which
+            // waved every copy of the UUID in this slice through to vanilla. Vanilla then swapped
+            // the first one in for the outgoing entity and refused the rest with "Keeping entity",
+            // leaving them in the chunk list to be saved again - the exact stuck duplicate this
+            // register exists to clear.
+            final boolean unloadRace = live != null && mtmixins$pendingUnload(self, live);
+            if (unloadRace) {
+                live = null;
             }
 
             if (live == null) {
                 live = seenInBatch.get(uuid);
             }
             if (live == null) {
+                if (unloadRace) {
+                    mtmixins$noteUnloadRace(self, incoming, uuid);
+                }
                 seenInBatch.put(uuid, incoming);
                 continue;
             }
@@ -353,6 +348,30 @@ public abstract class MixinWorldServerEntityDupe {
                 mtmixins$reidentified++;
                 mtmixins$report(incoming, uuid, self, "gave a fresh UUID to");
             }
+        }
+    }
+
+    /**
+     * Logged on its own rather than only inside {@link #mtmixins$report}, because an unload race
+     * resolves to "leave it to vanilla" before any report runs - so a server where EVERY case is an
+     * unload race printed nothing at all, and "it worked" and "it never loaded" looked identical in the
+     * log. First one, then every hundredth, so it stays measurable without reproducing the spam it
+     * replaced.
+     */
+    @Unique
+    private static void mtmixins$noteUnloadRace(WorldServer world, Entity incoming, UUID uuid) {
+        mtmixins$unloadRaces++;
+        if (mtmixins$unloadRaces == 1L || mtmixins$unloadRaces % 100L == 0L) {
+            MedievalTimesMixins.LOG.warn(
+                    "Chunk unload race, not a duplicate: {} (UUID {}) at {},{},{} in {} was "
+                            + "reloaded while its own copy was still queued for unload. "
+                            + "Left alone. {} of these so far; vanilla handles them and logs "
+                            + "nothing. Before register B15 was corrected these were being "
+                            + "deleted. See MC-101734.",
+                    EntityList.getKey(incoming), uuid,
+                    (int) incoming.posX, (int) incoming.posY, (int) incoming.posZ,
+                    world.provider.getDimensionType().getName(),
+                    mtmixins$unloadRaces);
         }
     }
 
