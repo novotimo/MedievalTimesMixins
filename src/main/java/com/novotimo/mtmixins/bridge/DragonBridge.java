@@ -69,9 +69,10 @@ public final class DragonBridge {
                                 + "dragon breath damage per victim.", POLICY);
             } catch (Throwable changed) {
                 MedievalTimesMixins.LOG.error(
-                        "{} is present but does not have the expected methods. Dragon block protection will "
-                                + "REFUSE all dragon block changes inside claims as a safe default, and dragon "
-                                + "damage is left alone. Check whether Civilizations changed.", POLICY, changed);
+                        "{} is present but does not have the expected methods. Without the policy there is no "
+                                + "way to tell claimed land from unclaimed, so dragons will be REFUSED every block "
+                                + "change everywhere as a safe default, and dragon damage is left alone. Check "
+                                + "whether Civilizations changed.", POLICY, changed);
             }
         }
 
@@ -117,7 +118,7 @@ public final class DragonBridge {
         try {
             return (Boolean)BLOCK_CHANGE_ALLOWED.invoke(null, world, pos, dragon);
         } catch (Throwable t) {
-            fail("blockChangeAllowed", t, "dragon block changes inside claims will be refused");
+            fail("blockChangeAllowed", t, "dragons will be refused every block change, claimed or not");
             return false;
         }
     }
