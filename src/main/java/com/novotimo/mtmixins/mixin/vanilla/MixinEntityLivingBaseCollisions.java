@@ -29,11 +29,17 @@ import org.spongepowered.asm.mixin.injection.At;
  * the pushing itself &mdash; and this cap stops the scan's <i>results</i> being acted on without
  * stopping the scan. The remaining 62% needs an activation range, which is a different change.
  *
- * <h2>The implementation is Spigot's, not invented here</h2>
+ * <h2>How this differs from upstream</h2>
  *
- * <p>Both entities in a pair must be under the cap, and both are charged when a push happens. That
- * symmetry is the point: capping only the pusher would let a single animal be shoved by all forty of
- * its neighbours, which is most of the cost in exactly the case this is meant to fix.
+ * <p>The setting and its default are Spigot's {@code max-entity-collisions}; the loop is not. Paper's
+ * 1.12.2 patch ({@code Cap Entity Collisions}) gates only the pusher: at the start of its own pass it
+ * does {@code numCollisions = max(0, numCollisions - max)}, stops once it reaches {@code max}, and
+ * charges both sides without ever checking the pushed entity's count. Here both entities in a pair must
+ * be under the cap and both are charged, within one world tick. That symmetry is deliberate: capping
+ * only the pusher would let a single animal be shoved by all forty of its neighbours in one tick, which
+ * is most of the cost in exactly the case this is meant to fix. The price is that the pushed side's
+ * count is load-bearing, so it must clear every tick for every entity, ticked or not; see
+ * {@link MixinEntityCollisionCount}.
  *
  * <p>Wrapping the {@code collideWithEntity} call rather than the whole method leaves vanilla's
  * {@code maxEntityCramming} damage untouched, which runs earlier in the same method. Spigot is explicit
