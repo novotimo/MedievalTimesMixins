@@ -38,7 +38,8 @@ import javax.tools.ToolProvider;
  *
  * <p>Plain Java on purpose, so it runs the same from PowerShell, cmd or bash. Needs a JDK 11 or newer
  * (single-file source launch, and javac for {@code --release 8}), git on the PATH unless
- * {@code --baseline-dir} is given, and Maven Central for the first run.
+ * {@code --baseline-dir} is given, and Maven Central for the first run (the jars are pinned by SHA-1 and
+ * cached in {@code .work/deps}, so later runs work offline).
  *
  * <pre>
  *   java tools/mixin-harness/Run.java                       baseline 96cc13c vs working tree
@@ -52,17 +53,18 @@ public class Run {
     static final String PKG = "src/main/java/com/novotimo/mtmixins";
     static final String MAVEN = "https://repo1.maven.org/maven2/";
 
-    static final String[] JARS = {
-            "net/fabricmc/sponge-mixin/0.17.4+mixin.0.8.7/sponge-mixin-0.17.4+mixin.0.8.7.jar",
-            "io/github/llamalad7/mixinextras-common/0.5.5/mixinextras-common-0.5.5.jar",
-            "org/ow2/asm/asm/9.7/asm-9.7.jar",
-            "org/ow2/asm/asm-tree/9.7/asm-tree-9.7.jar",
-            "org/ow2/asm/asm-commons/9.7/asm-commons-9.7.jar",
-            "org/ow2/asm/asm-util/9.7/asm-util-9.7.jar",
-            "org/ow2/asm/asm-analysis/9.7/asm-analysis-9.7.jar",
-            "org/apache/logging/log4j/log4j-api/2.8.1/log4j-api-2.8.1.jar",
-            "com/google/guava/guava/21.0/guava-21.0.jar",
-            "com/google/code/gson/gson/2.8.0/gson-2.8.0.jar",
+    /** Maven coordinate path and its SHA-1, pinned so a rerun needs no network and a bad download is caught. */
+    static final String[][] JARS = {
+            {"net/fabricmc/sponge-mixin/0.17.4+mixin.0.8.7/sponge-mixin-0.17.4+mixin.0.8.7.jar", "5f66cc9f59b8efaa942155a3d5a30599bf6640dd"},
+            {"io/github/llamalad7/mixinextras-common/0.5.5/mixinextras-common-0.5.5.jar", "50d37e763fe461b5e9df961436b399e9b681ac35"},
+            {"org/ow2/asm/asm/9.7/asm-9.7.jar", "073d7b3086e14beb604ced229c302feff6449723"},
+            {"org/ow2/asm/asm-tree/9.7/asm-tree-9.7.jar", "e446a17b175bfb733b87c5c2560ccb4e57d69f1a"},
+            {"org/ow2/asm/asm-commons/9.7/asm-commons-9.7.jar", "e86dda4696d3c185fcc95d8d311904e7ce38a53f"},
+            {"org/ow2/asm/asm-util/9.7/asm-util-9.7.jar", "c0655519f24d92af2202cb681cd7c1569df6ead6"},
+            {"org/ow2/asm/asm-analysis/9.7/asm-analysis-9.7.jar", "e4a258b7eb96107106c0599f0061cfc1832fe07a"},
+            {"org/apache/logging/log4j/log4j-api/2.8.1/log4j-api-2.8.1.jar", "e801d13612e22cad62a3f4f3fe7fdbe6334a8e72"},
+            {"com/google/guava/guava/21.0/guava-21.0.jar", "3a3d111be1be1b745edfa7d91678a12d7ed38709"},
+            {"com/google/code/gson/gson/2.8.0/gson-2.8.0.jar", "c4ba5371a29ac9b2ad6129b1d39ea38750043eff"},
     };
 
     /** Mod sources the tested mixins need, relative to PKG. A file missing from a build is skipped. */
@@ -138,8 +140,8 @@ public class Run {
         deps = work.resolve("deps");
         Files.createDirectories(deps);
         List<String> depPaths = new ArrayList<>();
-        for (String jar : JARS) {
-            depPaths.add(fetch(jar).toString());
+        for (String[] jar : JARS) {
+            depPaths.add(fetch(jar[0], jar[1]).toString());
         }
         depsClasspath = String.join(File.pathSeparator, depPaths);
 
@@ -237,7 +239,8 @@ public class Run {
 
     static final Pattern CHECK = Pattern.compile("^(\\[[^\\]]+\\][^:]*): (PASS|FAIL)\\b");
     static final Pattern TRUTH = Pattern.compile("slots = (\\d+)%");
-    static final Pattern LOGGED = Pattern.compile("over 100 fills: [0-9.]+ slots, (\\d+)% of capacity");
+    /** The mixin formats with the default locale; the child JVM is pinned to en-US, but accept a comma anyway. */
+    static final Pattern LOGGED = Pattern.compile("over 100 fills: [0-9.,]+ slots, (\\d+)% of capacity");
 
     static void runTest(String variant, String config, String testClass, Path build, Map<String, String> results)
             throws IOException, InterruptedException {
@@ -245,6 +248,7 @@ public class Run {
         Path log = dir.resolve("log.txt");
         String java = Paths.get(System.getProperty("java.home"), "bin", isWindows() ? "java.exe" : "java").toString();
         List<String> cmd = new ArrayList<>(Arrays.asList(java,
+                "-Duser.language=en", "-Duser.country=US",
                 "-Dorg.apache.logging.log4j.simplelog.level=INFO",
                 "-Dorg.apache.logging.log4j.simplelog.logFile=" + log,
                 "-cp", cp(build.resolve("harness").toString(), depsClasspath),
@@ -311,8 +315,8 @@ public class Run {
         try {
             p = pb.start();
         } catch (IOException e) {
-            die("Could not run git (" + e.getMessage() + "). Install git, or pass --baseline-dir pointing at a "
-                    + "checkout of the baseline's " + PKG + ".");
+            die("Could not run git (" + e.getMessage() + "). Install git, or point the harness at a copy of the "
+                    + "baseline's " + PKG + ": run.ps1 -BaselineDir <dir>, or Run.java --baseline-dir <dir>.");
             return null;
         }
         String out = readAll(p.getInputStream());
@@ -364,13 +368,20 @@ public class Run {
         return null;
     }
 
-    static Path fetch(String coordinate) throws Exception {
+    /** Returns the cached jar when its hash matches; only a missing or damaged jar touches the network. */
+    static Path fetch(String coordinate, String expected) throws Exception {
         Path target = deps.resolve(coordinate.substring(coordinate.lastIndexOf('/') + 1));
-        String expected = new String(download(MAVEN + coordinate + ".sha1"), StandardCharsets.US_ASCII).trim().split("\\s+")[0];
         if (Files.isRegularFile(target) && sha1(Files.readAllBytes(target)).equalsIgnoreCase(expected)) {
             return target;
         }
-        byte[] jar = download(MAVEN + coordinate);
+        byte[] jar;
+        try {
+            jar = download(MAVEN + coordinate);
+        } catch (IOException e) {
+            die("Could not download " + MAVEN + coordinate + " (" + e + "). The first run needs internet access "
+                    + "to Maven Central; later runs use the copies in " + deps + ".");
+            return null;
+        }
         String actual = sha1(jar);
         if (!actual.equalsIgnoreCase(expected)) {
             die("Checksum mismatch for " + coordinate + ": expected " + expected + ", got " + actual);
