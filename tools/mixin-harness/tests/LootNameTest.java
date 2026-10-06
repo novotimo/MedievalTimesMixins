@@ -17,6 +17,6 @@ public class LootNameTest {
         String real = ((INamedLootTable) chest).mtmixins$lootTableName();
         System.out.println("[lootattrib] after 20000 lookups of 5 missing tables: shared empty table's name is " + empty.length() + " chars, took " + ms + " ms; starts " + empty.substring(0, Math.min(90, empty.length())));
         System.out.println("[lootattrib] real table still named: " + real);
-        System.out.println("[lootattrib] " + (empty.length() < 200 && "mod:chest".equals(real) ? "PASS" : "FAIL"));
+        System.out.println("[lootattrib] shared name bounded: " + (empty.length() < 200 && "mod:chest".equals(real) ? "PASS" : "FAIL"));
     }
 }
