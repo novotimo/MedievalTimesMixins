@@ -1,284 +1,407 @@
 # Bug fix report
 
-Baseline: `96cc13c` ("Dragon claim protection and breath damage policy"). Fixes are on branch
-`claude/tender-edison-ygomlf`.
+Fixes 1–8 were merged in PR #1 (baseline `96cc13c`). Fix 9 is in this branch.
 
-**Before** means a jar built from `96cc13c`. **After** means a jar built from this branch
-(`./gradlew build`, deploy `build/libs/mtmixins-0.2.0.jar`).
+Every bug below has numbered in-game steps. Run them once with the **baseline** jar (bug shows) and
+once with the **fixed** jar (bug gone). The regression steps must give the same result on both jars.
+Section 10 is the same check done offline with the harness.
 
-**Harness.** `tools/mixin-harness/run.sh [baseline-rev]` builds the mixins from the baseline and from
-the working tree, applies each build with the real Mixin 0.8.7 transformer and MixinExtras 0.5.5 to
-stand-in classes that have the same method shapes as the real targets, and runs one test per fix. It
-needs JDK 9+ and Maven Central on the first run, and takes about 20 s. A bug shows as `FAIL` on the
-baseline and `PASS` on the working tree. Every regression case must `PASS` on both.
+## 0. Setup
 
----
+### 0.1 Build both jars (PowerShell, repo root)
 
-## 1. B18: collision counter never clears for minecarts, so they become unpushable
+```powershell
+git restore --source 96cc13c --worktree -- src      # sources as they were before the fixes
+.\gradlew.bat build
+Copy-Item build\libs\mtmixins-0.2.0.jar ..\mtmixins-BASELINE.jar
+git restore --worktree -- src                       # back to the current sources
+.\gradlew.bat build
+Copy-Item build\libs\mtmixins-0.2.0.jar ..\mtmixins-FIXED.jar
+git status                                          # must be clean
+```
 
-**Files:** `mixin/vanilla/MixinEntityCollisionCount.java`, `mixin/vanilla/MixinEntityLivingBaseCollisions.java` (javadoc only)
+`git restore --source` also deletes files that did not exist at `96cc13c`
+(`MixinMaterialSpawnLocation.java`), so the baseline jar is exactly the old code.
 
-**Defect.** The per-tick push count was reset by an `@Inject` at HEAD of `Entity.onUpdate`. Two cases
-never reach that point:
+### 0.2 Test server
 
-- `EntityMinecart.onUpdate` never calls `super.onUpdate()`.
-- Entities outside the area the world ticks are never updated at all.
-
-`MixinEntityLivingBaseCollisions` refuses a push when *either* side is at the cap, so once such an
-entity reaches 8 pushes it can never be pushed by a living entity again until its chunk reloads. A
-stationary minecart only collides with other minecarts in its own tick, so walking into it does
-nothing.
-
-There is a second effect: a ticking entity's count was wiped at its own update, which discarded the
-pushes it received earlier in the same tick. One entity could take part in up to 2× the cap per tick.
-
-**Upstream.** Paper 1.12.2, `Spigot-Server-Patches/0199-Cap-Entity-Collisions.patch`, gates only the
-pusher. At the start of the pusher's own pass it sets
-`numCollisions = Math.max(0, numCollisions - max)` and never reads the pushed entity's count, so it has
-no reset to miss. The javadoc said the symmetric gate and the `onUpdate` reset were Spigot's. That was
-wrong, and the javadoc is now corrected. The symmetric gate is kept as a deliberate local choice.
-
-**Fix.** The count is stored together with `world.getTotalWorldTime()` and reads as 0 in any other
-tick. The `onUpdate` inject is removed.
-
-**Reproduce (before).**
-1. Run a server or singleplayer world with the baseline jar. Make sure there is no
-   `config/mtmixins-collisions.properties`, so the cap is the default 8.
-2. On flat ground with no rails, run `/summon minecraft:minecart ~3 ~ ~`.
-3. Walk into the cart. It slides for the first few contacts (8 ticks of contact, under half a second),
-   then stops reacting to players and mobs. It stays stuck until the chunk unloads and reloads, after
-   which it slides for 8 more ticks of contact.
-4. Harness: `CollisionTest` prints `minecart pushed 8 times (expected 20)` → `FAIL`, and
-   `pushes per tick ... max 297` (above the 40×8/2 = 160 bound) → `FAIL`.
-
-**Verify (after).**
-1. Repeat steps 1–3. The cart slides on every contact, indefinitely.
-2. Harness: `CollisionTest` shows `minecart: PASS` (20/20) and `pen: PASS` (156 pushes per tick for
-   40 cows, ≤ 160; no entity above 8).
-3. Regression:
-   - `max-entity-collisions = 0` in `config/mtmixins-collisions.properties`: mobs do not push each
-     other.
-   - `max-entity-collisions = -1`: vanilla pushing.
-   - Cramming: run `/gamerule maxEntityCramming 24` and put 30 cows in a 1×1 pit. They still take
-     cramming damage (that code runs before the wrapped call and is untouched).
-   - With the pit loaded, `/spark profiler --timeout 60` on baseline and on the branch: time under
-     `EntityLivingBase.collideWithNearbyEntities` is the same or lower on the branch, and far higher
-     with `-1`.
+- Use a copy of the world, or a new world. Several steps edit terrain or region files.
+- To switch builds: stop the server, put exactly one of the two jars in `mods\`, then start it.
+- You need op level 4 (`/forge gen` requires it; it is the dedicated-server default). Type all commands
+  in chat.
+- `config\mixinbooter.cfg` must not blacklist any `mixins.mtmixins.*.json`.
+- Unless a step says otherwise, delete `config\mtmixins-collisions.properties` so the collision cap is
+  the default 8.
 
 ---
 
-## 2. B15: unload race skipped duplicate resolution for the rest of the slice
+## 1. B18: a minecart stops being pushable after 8 pushes
+
+**Files:** `mixin/vanilla/MixinEntityCollisionCount.java`, `mixin/vanilla/MixinEntityLivingBaseCollisions.java`
+
+**Defect.** The per-tick push counter was reset at the head of `Entity.onUpdate`, but
+`EntityMinecart.onUpdate` never calls `super.onUpdate()`, so a minecart's counter only ever went up. A
+push is refused when *either* entity is at the cap. After 8 pushes the cart therefore refused every
+push from a player or mob until its chunk unloaded. A stationary cart only collides with other carts in
+its own tick, so nothing else moved it either.
+
+**Fix.** The counter is stamped with `world.getTotalWorldTime()` and reads as 0 in any other tick.
+
+**Reproduce (baseline jar).**
+1. Stand on flat ground with no rails nearby.
+2. Run `/summon minecraft:minecart ~3 ~ ~`.
+3. Walk into the cart, back off, and repeat. It slides for the first one or two contacts (8 ticks of
+   contact in total, under half a second), then stops reacting to being walked into, from any side.
+4. It stays frozen until its chunk unloads (walk well past view distance, then come back) or the server
+   restarts. After that it moves for another 8 ticks of contact. Near spawn the chunk never unloads,
+   so the cart stays frozen until a restart.
+
+**Expected (fixed jar).** Same steps: the cart slides on every contact, indefinitely. This is what
+you saw (your log shows the 0.2.0 fixed build).
+
+**Regression (same result on both jars).**
+1. `/gamerule maxEntityCramming 24`. Dig a 1×1 hole two deep and run
+   `/summon minecraft:cow <x> <y> <z>` 30 times on its floor. The cows take cramming damage.
+2. Create `config\mtmixins-collisions.properties` containing `max-entity-collisions = 0`, then
+   restart. Walking into a cow no longer moves it, and cows in the pit stop pushing each other.
+3. Set `max-entity-collisions = -1` and restart. Pushing is vanilla.
+4. Delete the file and restart. Walking into a cow pushes it normally.
+
+---
+
+## 2. B15: a chunk-unload race let duplicate entities through
 
 **File:** `mixin/vanilla/MixinWorldServerEntityDupe.java`
 
-**Defect.** When the world's copy of a UUID was queued for unload, the loop hit `continue` before it
-consulted `seenInBatch`. Every copy of that UUID in the same entity slice then went to vanilla.
-Vanilla swapped in the first copy and refused the rest with
-`Keeping entity <id> that already exists with UUID <uuid>`. The refused copies stay in the chunk's
-entity list and are saved again, which is the permanent duplicate B15 exists to remove.
+**Defect.** When an incoming entity's UUID belonged to a world entity that was queued for unload, the
+loop hit `continue` before checking the other copies in the same 16-block slice. All copies went to
+vanilla. Vanilla swapped in the first copy and refused the rest with `Keeping entity ... that already
+exists`, which leaves them in the chunk's entity list, so they are saved again. They survive until the
+chunk's next load that is not itself a race; that load deletes them.
 
-**Upstream.** Paper 1.12.2, `Spigot-Server-Patches/0338-Duplicate-UUID-Resolve-Option.patch`:
-`if (other == null || other.dead || world.getEntityUnloadQueue().contains(other)) other = thisChunk.get(entity.uniqueID);`
+**Fix.** Same order as Paper's resolver: a queued-for-unload world copy counts as absent, and the copies
+seen earlier in the batch are checked next.
 
-**Fix.** Same ordering as Paper. A world copy that is queued for unload is treated as absent, then the
-batch map is checked. The unload-race log line moved into `mtmixins$noteUnloadRace` with unchanged
-text and rate. It now counts a race only when no earlier copy in the batch claims the UUID.
+**Why the steps work.** A race needs an entity to still be queued for unload when a chunk holding a copy
+of it loads. Normally the queue is emptied at the end of the same tick. Forge's
+`WorldServer.updateEntities` returns early once a world has had no players for 300 ticks (and has no
+force-loaded chunks), so the queue is not emptied. With nobody in the Overworld, an entity unloaded
+there stays queued, and `/forge gen` can then load the second chunk while it is still queued.
 
-**Reproduce (before).**
-1. This cannot be triggered on demand in game. It needs a chunk to unload and reload in the same tick
-   while it holds ≥ 2 copies of one UUID in one 16-block slice and another copy of that UUID is queued
-   for unload.
-2. Live signature: a `Chunk unload race, not a duplicate` line for a UUID, followed by vanilla's
-   `Keeping entity ... that already exists with UUID <same uuid>`. The UUID is still in that chunk
-   twice on the next load (check with `/tellme` or NBTExplorer).
-3. Harness: `DupeTest` prints `unload race + 2 copies in slice: FAIL - chunk list now 2 entities ... Keeping entity`.
+**One-time setup (both jars use the same prepared world).**
+1. Choose a spot at least 400 blocks from world spawn. The commands below use x=2008. If your spawn is
+   near there, add the same offset to every x coordinate in this section.
+2. Run:
+   ```
+   /summon minecraft:armor_stand 2008 80 8 {CustomName:"E1",NoGravity:1b}
+   /summon minecraft:armor_stand 2008 80 24 {CustomName:"E2",NoGravity:1b}
+   /summon minecraft:armor_stand 2008 80 24 {CustomName:"E3",NoGravity:1b}
+   ```
+   E1 is in chunk A (125, 0). E2 and E3 are in chunk B (125, 1), at the same position and in the same
+   16-block slice.
+3. Go back to spawn, run `/save-all`, and stop the server. Log out at spawn, not near x=2008.
+4. In NBTExplorer, open `world\region\r.3.0.mca`.
+   - Chunk [29, 0] (world chunk 125, 0) → Entities: set E1's `UUIDMost` to `7` and `UUIDLeast` to `7`.
+   - Chunk [29, 1] → Entities: do the same for E2 and E3.
+   - Save.
+5. Make two copies of this world folder, one for each jar.
 
-**Verify (after).**
-1. Harness: `DupeTest` prints `unload race + 2 copies in slice: PASS - chunk list now 1 entities`. The
-   only vanilla warning is `Tried to add entity ... but it was marked as removed already` for the
-   dropped copy, the same line every B15 drop already produces.
-2. Regression, all `PASS` on baseline and branch:
-   - Plain unload race: vanilla swap, nothing dropped, no warnings.
-   - Live nearby duplicate: dropped and pruned from the chunk.
-   - Live distant duplicate: re-identified, both kept.
-   - Three copies in one slice with no race: two dropped.
-3. On the server, `Duplicate UUID resolved` and `Chunk unload race` lines keep their existing format.
-   The `unload races skipped` total no longer counts the extra copies.
+**Reproduce (baseline jar).**
+1. Start the server and join. You are at spawn, so neither chunk is loaded.
+2. Run `/gamemode 3`, then `/forge setdim @p -1`. You are now in the Nether and the Overworld has no
+   players.
+3. Wait at least 20 seconds (300 ticks plus margin).
+4. Run `/forge gen 2008 80 8 1 0` and wait for it to report completion. Chunk A loads (E1 joins the
+   world) and is queued for unload; it unloads on the next tick, and E1 stays queued.
+5. Run `/forge gen 2008 80 24 1 0`. Chunk B loads while E1 is still queued.
+6. `logs\latest.log` now shows:
+   ```
+   [Medieval Times Mixins]: Chunk unload race, not a duplicate: minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,24 ...
+   [net.minecraft.world.WorldServer]: Keeping entity minecraft:armor_stand that already exists with UUID 00000000-0000-0007-0000-000000000007
+   ```
+7. Run `/save-all flush`, stop the server, and open chunk [29, 1] in NBTExplorer. It still holds two
+   armor stands with UUID 7/7.
+
+**Expected (fixed jar, second world copy, same steps).** Step 6 shows the race line, then
+`Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,24 in overworld. ...`
+and vanilla's `Tried to add entity minecraft:armor_stand but it was marked as removed already`. There is
+no `Keeping entity` line. Step 7 shows one armor stand in chunk [29, 1].
+
+If step 6 shows no race line on either jar, something is force-loading Overworld chunks and keeping
+entity updates running. Repeat on a new world.
+
+**Regression (same result on both jars).**
+1. *Plain race.* Same steps, but in setup step 4 delete E3 from chunk [29, 1]. Step 6 shows only the
+   race line: no drop, no `Keeping entity`. Chunk [29, 1] keeps one armor stand.
+2. *Duplicates without a race.* Same setup as the main test, but skip reproduce steps 2–3 and stay in the
+   Overworld at spawn. Run both `/forge gen` commands. The log shows
+   `Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand ...` and no race line.
 
 ---
 
-## 3. B2b: OreVeins biome cache returned another world's biome
+## 3. B2b: OreVeins used another world's biome
 
 **Files:** `util/ChunkBiomeCache.java`, `mixin/oreveins/MixinWorldGenVeins.java`
 
-**Defect.** `WorldGenVeins` is a single `IWorldGenerator` shared by every dimension, and on an
-integrated server it lives for the whole JVM. The cache key was chunk coordinates only. A column in
-world B was therefore answered with world A's biome whenever that cache slot last held the same chunk
-coordinates from A. `matchesBiome` then accepted or rejected veins against the wrong biome. Affected
-cases:
+**Defect.** `WorldGenVeins` is a single instance shared by every dimension. Its biome cache was keyed
+by chunk coordinates only, so generating chunk (X, Z) in one dimension right after the same (X, Z) in
+another reused the first dimension's biomes.
 
-- A vein enabled in several dimensions.
-- Any two dimensions generating the same coordinates.
-- In singleplayer, every save opened after the first in one session.
+**Fix.** Cache entries are stamped with the world that wrote them, held weakly so an unloaded world can
+still be freed. A lookup from any other world misses.
 
-**Fix.** Each entry is stamped with a per-world generation object that holds the `World` weakly, so it
-never keeps a world alive. A lookup from a different world is a miss. The lock-free immutable-entry
-design is unchanged.
+**Setup (both jars).** Create `config\oreveins\mtmixins_repro.json`:
+```json
+{
+  "mtmixins_repro_nether_only": {
+    "type": "cluster",
+    "ore": "minecraft:sponge",
+    "stone": ["minecraft:stone", "minecraft:netherrack"],
+    "count": 6,
+    "rarity": 1,
+    "min_y": 32,
+    "max_y": 64,
+    "horizontal_size": 16,
+    "vertical_size": 10,
+    "density": 80,
+    "dimensions": [0, -1],
+    "biomes": ["NETHER"]
+  }
+}
+```
+This vein is allowed in the Overworld and the Nether, but only in biomes tagged `NETHER`. The Overworld
+has none, so it can never legitimately place a block there. Dry sponge does not generate naturally.
+Restart the server so OreVeins loads the file. Keep the player at spawn, nowhere near the coordinates
+used below.
 
-**Reproduce (before).**
-1. In game the result depends on generation order and is not deterministic. Concrete form: give a
-   vein `"dimensions": [0, -1]`, `"biomes": ["hell"]`, ore `minecraft:gold_block`, and stone
-   `minecraft:stone` plus `minecraft:netherrack`. Generate the same coordinates in the Nether and the
-   Overworld alternately (two players at the same X/Z, or a pregenerator running both dimensions at
-   once). Gold blocks appear in Overworld stone, which is impossible because the Overworld has no
-   `hell` biome. Some Nether chunks also miss veins they should have.
-2. Harness: `OreVeinsTest` prints `matchesBiome saw 0 x hell, 256 x forest (expected 256 x hell)` →
-   `cross-world: FAIL`.
+**Reproduce (baseline jar).** Use a fresh area (never visited, in either dimension).
+1. `/forge gen 40000 64 40000 1 -1`. This generates and populates Nether chunk (2500, 2500) only. Wait
+   for completion.
+2. `/forge gen 40000 64 40000 1 0`. This does the same in the Overworld. Wait for completion.
+3. Run `/tp @p 40016 100 40016` (Overworld), then
+   `/fill 40008 32 40008 40023 64 40023 minecraft:air 0 replace minecraft:sponge`.
+   It reports **N blocks filled with N > 0**: sponge in Overworld stone, placed by a vein that requires
+   a Nether biome.
 
-**Verify (after).**
-1. Harness: `cross-world: PASS` (256 × hell). `same-world cache: PASS`: back in the first world, one
-   pass of 256 `getBiome` calls, then a repeat pass with 0 calls, all answers correct. The cache still
-   works.
-2. Regression for single-world output: in a fresh JVM each time, create a world from a fixed seed and
-   pregenerate the same area with the baseline jar and with the branch jar. Ore counts in the area
-   (TellMe `blockstats`, or MCA Selector) are identical. Single-world lookups return what they did
-   before.
+**Expected (fixed jar).** Use a different fresh area (for example 48000 everywhere you used 40000, and
+48008/48023 in the `/fill`). Step 3 reports **No blocks filled**.
+
+**Regression (same result on both jars).**
+1. Run `/forge setdim @p -1 40016 100 40016` (use spectator mode, `/gamemode 3`, to avoid
+   suffocating), then the same `/fill` in the Nether. N > 0, so the vein still generates where it
+   should. On the fixed jar use the 48000 area.
+2. Delete `config\oreveins\mtmixins_repro.json` when you are done.
 
 ---
 
-## 4. B13: Lycanites `block` and `material` spawners still generated chunks
+## 4. B13: Lycanites `block` and `material` spawners still loaded or generated chunks
 
 **Files:** `mixin/lycanites/MixinBlockSpawnLocation.java`, `mixin/lycanites/MixinMaterialSpawnLocation.java` (new), `mixins.mtmixins.cascade.json`
 
-**Defect.** The guard at HEAD of `BlockSpawnLocation.isValidBlock` only covered `RandomSpawnLocation`,
-which calls `super.isValidBlock` on bare columns. Two other paths were missed:
+**Defect.** `BlockSpawnLocation.getSpawnPositions` calls `world.getBlockState()` on every candidate
+*before* `isValidBlock`, so the guard on `isValidBlock` never saw an unloaded chunk.
+`MaterialSpawnLocation` overrides `isValidBlock` without calling `super`. Only `random` locations were
+covered. The stock `lava`, `fire` and `mineshaft` spawners are `block` locations.
 
-- `BlockSpawnLocation.getSpawnPositions` calls `world.getBlockState(pos)` on every candidate to skip
-  flowing liquids, *before* `isValidBlock`. That read loads or generates the chunk, so the guard never
-  fired on this path. This is true of every Lycanites 1.12.2 version from 2019-06-11 ("Block Spawn
-  Location Fix") through community 2.0.8.10 (GitLab `Lycanite/LycanitesMobs`, branch
-  `Minecraft-1.12.2`).
-- `MaterialSpawnLocation` overrides `isValidBlock` without calling `super` and opens with its own
-  `getBlockState`.
+**Fix.** Inside the sweep, `getBlockState` returns air for an unloaded position, and
+`MaterialSpawnLocation.isValidBlock` gets the same guard.
 
-The stock `lava`, `fire` and `mineshaft` spawners are `"type": "block"` with a 65×65×65 sweep around
-the player.
+**Setup (both jars).**
+1. In `server.properties` set `view-distance=3` (restore it afterwards). The server then only loads
+   chunks within 3 chunks of a player.
+2. Create these three files in `config\lycanitesmobs\spawners\`:
 
-**Fix.** A `@WrapOperation` on `World.getBlockState` inside `getSpawnPositions` returns air for an
-unloaded position, and `isValidBlock` then rejects it. `MaterialSpawnLocation.isValidBlock` gets the
-same HEAD guard.
+   `mtrepro_block.json`
+   ```json
+   {"name": "mtrepro_block", "type": "spawner", "enabled": true, "enableWithoutMobs": true,
+    "ignoreBiomes": true, "conditions": [], "triggers": [],
+    "locations": [{"type": "block", "rangeMin": [0, 0, 0], "rangeMax": [80, 0, 80], "blocks": [], "listType": "blacklist"}]}
+   ```
+   `mtrepro_material.json`
+   ```json
+   {"name": "mtrepro_material", "type": "spawner", "enabled": true, "enableWithoutMobs": true,
+    "ignoreBiomes": true, "conditions": [], "triggers": [],
+    "locations": [{"type": "material", "rangeMin": [0, 0, 0], "rangeMax": [80, 0, 80], "materials": ["air"]}]}
+   ```
+   `mtrepro_random.json`
+   ```json
+   {"name": "mtrepro_random", "type": "spawner", "enabled": true, "enableWithoutMobs": true,
+    "ignoreBiomes": true, "conditions": [], "triggers": [],
+    "locations": [{"type": "random", "rangeMin": [0, 0, 0], "rangeMax": [80, 2, 80]}]}
+   ```
+   They have no triggers and no mobs, so they only ever run when you run `/lm spawner test`. A
+   `block`/`material` sweep then checks every position within 80 blocks horizontally, at your Y level.
+3. Restart the server.
 
-**Reproduce (before).**
-1. On a server with the baseline jar and Lycanites, start `/spark profiler --thread "Server thread"`.
-2. Repeatedly teleport into ungenerated terrain next to lava (for example `/tp @p 20000 80 20000`, then
-   a new location each time), so spawner sweeps run before the surrounding chunks have loaded.
-3. Stop the profiler. Stacks
-   `BlockSpawnLocation.getSpawnPositions → World.getBlockState → ChunkProviderServer.provideChunk`
-   (load or generate) are present.
-4. Harness: `LycanitesTest` prints `BlockSpawnLocation sweep: FAIL` and
-   `MaterialSpawnLocation sweep: FAIL`, both with chunks `[-1,-1 … 1,1]` loaded by the scan.
-   `RandomSpawnLocation: PASS`.
+**Reproduce (baseline jar).**
+1. Go at least 300 blocks from spawn, so you are outside the always-loaded spawn chunks.
+2. Run `/testforblock ~72 ~ ~ minecraft:stone`. It reports **"Cannot test for block outside of the
+   world"**: that chunk (4–5 chunks away) is not loaded.
+3. Run `/lm spawner test mtrepro_block`.
+4. Run `/testforblock ~72 ~ ~ minecraft:stone` again **within 30 seconds**. It now names the block
+   there (or says it was found): the sweep loaded the chunk, or generated it if it was new.
+5. Walk 300 blocks further, then repeat steps 2–4 with `/lm spawner test mtrepro_material`. Same
+   result.
 
-**Verify (after).**
-1. Same profile: no `provideChunk` under `getSpawnPositions` or `MaterialSpawnLocation.isValidBlock`.
-2. Harness: all three `PASS`. The sweeps load 0 chunks and return 768 positions, exactly the candidates
-   inside the loaded chunk. `RandomSpawnLocation` returns the same 4 positions as on the baseline.
-3. Regression: in loaded terrain, lava, fire and mineshaft spawns occur at the same rate as on the
-   baseline (watch a known spot for 10 minutes on each build).
+**Expected (fixed jar).** Same steps: step 4 still says **"Cannot test for block outside of the world"**
+for both spawners.
+
+**Regression (same result on both jars).**
+1. Repeat with `/lm spawner test mtrepro_random`. Step 4 still says "outside of the world" on *both*
+   jars (that path was already guarded at baseline).
+2. Stand next to a lava lake in loaded terrain and run `/lm spawner test lava`. Lycanites lava mobs spawn
+   on both jars, so positions inside loaded chunks are still found.
+3. Afterwards, delete the three `mtrepro_*.json` files and restore `view-distance`.
 
 ---
 
-## 5. lootattrib: shared loot table's name grew on every lookup
+## 5. lootattrib: the shared empty loot table's name grew on every lookup
 
 **File:** `mixin/vanilla/MixinLootTableManagerName.java`
 
-**Defect.** Every missing table resolves to the single shared `LootTable.EMPTY_LOOT_TABLE`. After it
-had been asked for under two names, its name no longer matched any name, so every later lookup
-appended `"<shared: " + name + " and " + location + ">"`. This runs on every mob death and every loot
-chest. The string grows without bound and each append copies all of it. The cost is quadratic CPU and
-heap growth on the server thread for as long as `mixins.mtmixins.lootattrib.json` is loaded.
+**Defect.** Every missing loot table resolves to the single `LootTable.EMPTY_LOOT_TABLE`. Once it had
+been looked up under two names, every later lookup appended to its name. The string grows without bound
+and each append copies all of it, so tick time climbs steadily.
 
-**Fix.** The table is marked shared once (`<shared: a, b and possibly others>`) and then left alone.
+**Fix.** The table is marked shared once and then left alone.
 
-**Reproduce (before).**
-1. Run `/summon minecraft:zombie ~ ~ ~ {DeathLootTable:"mtmixins:missing_a"}`, then
-   `/kill @e[type=zombie]`.
-2. Repeat step 1 with `mtmixins:missing_b`.
-3. Set up a repeating command block running
-   `/summon minecraft:zombie ~ ~2 ~ {DeathLootTable:"mtmixins:missing_a",NoAI:1b}`, chained to
-   `/kill @e[type=zombie]`. Leave it for 20 minutes.
-4. `/spark profiler --timeout 60` shows `MixinLootTableManagerName` / `getLootTableFromLocation` →
-   `StringBuilder` / `Arrays.copyOf` growing, and MSPT rises steadily.
-5. Harness: `LootNameTest` reports a name of `559985 chars` after 20,000 lookups, taking about 7 s →
-   `FAIL`.
+**Reproduce (baseline jar).**
+1. Run `/summon minecraft:zombie ~ ~ ~ {DeathLootTable:"mtmixins:missing_b",NoAI:1b}` then
+   `/kill @e[type=zombie]`. This stamps the empty table as shared.
+2. Run `/summon minecraft:armor_stand ~ ~1 ~ {CustomName:"lr",NoGravity:1b,Invisible:1b}` **20 times**.
+3. Place a Repeating command block (Always Active) containing
+   `/execute @e[type=armor_stand,name=lr] ~ ~ ~ summon minecraft:zombie ~ ~ ~ {DeathLootTable:"mtmixins:missing_a",NoAI:1b,Silent:1b}`.
+   Behind it, place a Chain command block (Always Active) containing `/kill @e[type=zombie]`. That is
+   20 lookups of a missing table per tick.
+4. Run `/spark tps` (or `/forge tps`) right away, then every 2 minutes for 10 minutes. The tick time
+   (MSPT) climbs every time and does not level off. Within roughly 10 minutes the server is falling
+   behind ("Can't keep up!").
+5. Break the command blocks to stop.
 
-**Verify (after).**
-1. Same steps: MSPT stays flat and nothing from this mixin shows in the profile.
-2. Harness: 58 chars, about 5 ms → `PASS`. A real table is still stamped with its own name
-   (`real table still named: mod:chest`).
+**Expected (fixed jar).** Same steps: MSPT stays flat for the whole 10 minutes.
+
+**Regression (both jars): real tables are still named.** Use the hopper in fix 9's regression step. Its
+over-fill line shows `table minecraft:chests/simple_dungeon`.
 
 ---
 
-## 6. B20: "% of capacity" in the loot-fill log was computed against the wrong container
+## 6. B20: the "% of capacity" in the loot-fill log used the wrong container
 
 **File:** `mixin/vanilla/MixinLootTableShuffle.java`
 
-**Defect.** The occupancy log divided the running average of slots used by the slot count of
-whichever container happened to be the 1st, 100th, 200th, ... fill. With mixed container sizes the
-figure is meaningless; it can exceed 100%. This is the number used to check the 40–65% target. The
-`wouldHaveOverfilled` counter was incremented but never printed.
+**Defect.** Every 100th fill, the log line `Loot fill: ... Average occupancy over N fills: X slots,
+Y% of capacity` divided the running average by **that one container's** slot count. With mixed
+container sizes Y is meaningless and can exceed 100%.
 
-**Fix.** Capacity is summed alongside usage, giving total slots used ÷ total slots offered. The counter
-is printed as `N fills used every slot`.
+**Fix.** Slots used ÷ slots offered, both summed over all fills. The line also prints the "every slot
+used" counter, which used to be collected but never shown.
 
-**Reproduce (before).**
-1. Harness: `LootStatsTest` fills a 27-slot container 99 times and a 12-slot container once. Ground
-   truth is 1422 of 2685 slots = 53%. The baseline logs `... 14.2 slots, 119% of capacity` at fill 100.
-2. On the server, any `Loot fill:` line above 100% is this bug.
+**Setup.** Restart the server and do not explore or open loot containers, so the fill count starts at
+0 with your contraption.
 
-**Verify (after).**
-1. Harness: the branch logs `... 14.2 slots, 53% of capacity; 0 fills used every slot`, which matches
-   the ground truth.
-2. Regression: both runs produce the identical 1422/2685 placement, so loot behaviour is unchanged.
-   Only the log line differs.
+**Reproduce (baseline jar).**
+1. Pick two spots and run `/setblock <A> minecraft:chest` and `/setblock <B> minecraft:hopper`. Place
+   them with no loot table, so Lootr does not convert the chest.
+2. Build a command block line: a Repeating block (Always Active), then three Chain blocks (Always
+   Active), with these commands in order:
+   1. `/blockdata <A> {LootTable:"minecraft:chests/simple_dungeon"}`
+   2. `/replaceitem block <A> slot.container.0 minecraft:air`
+   3. `/blockdata <B> {LootTable:"minecraft:chests/jungle_temple_dispenser"}`
+   4. `/replaceitem block <B> slot.container.0 minecraft:air`
+
+   Each tick this fills the 27-slot chest once and then the 5-slot hopper once. `/replaceitem` triggers
+   the fill. The fills alternate, so every even-numbered fill is the hopper.
+3. Let it run for 5 seconds, then break the Repeating block.
+4. In `logs\latest.log`, find the line containing `over 100 fills`. It reads
+   `... stacks into 5 slots ... Average occupancy over 100 fills: ~8 slots, ~160% of capacity`.
+   Above 100% is impossible.
+
+**Expected (fixed jar).** Same steps: `... over 100 fills: ~8 slots, ~50% of capacity; 0 fills used
+every slot`. That is slots used ÷ slots offered across chest and hopper fills.
+
+If something else filled loot first, fill 100 may be a chest fill (`into 27 slots`). The baseline value
+is then about 30% instead of about 50%. It is still wrong, just not impossible. Use the `over 200 fills`
+line instead.
+
+**Regression.** Both jars place the same number of stacks per fill (compare the `N stacks into M slots`
+part of the lines). Only the percentage differs.
 
 ---
 
-## 7. `@Mod` version said 0.1.0 in a 0.2.0 build
+## 7. The `@Mod` version said 0.1.0 in the 0.2.0 build
 
 **File:** `MedievalTimesMixins.java`
 
-**Defect.** `VERSION = "0.1.0"`, while `gradle.properties` has `mod_version = 0.2.0` (the bump was in
-`98d3f37`). FML takes the version from the `@Mod` annotation, not from `mcmod.info`. The client Mods
-list, the FML handshake and crash-report mod tables therefore report 0.1.0 for the 0.2.0 jar.
+**Reproduce (baseline jar).** Start the server once, then the client: the Mods screen lists
+`Medieval Times Mixins 0.1.0`, and FML writes `mtmixins{0.1.0}` next to `mtmixins-0.2.0.jar`.
 
-**Fix.** `VERSION = "0.2.0"`, with a comment that it must track `mod_version`.
+**Expected (fixed jar).** `0.2.0`. Your attached log already shows the transition: line 2247 reads
+`This world was saved with mod mtmixins version 0.1.0 and it is now at version 0.2.0`. The world was
+last saved by the 0.2.0 baseline jar, which reported itself as 0.1.0.
 
-**Reproduce (before).** Build the baseline. The jar is named `mtmixins-0.2.0.jar`, but the client
-Mods screen shows `Medieval Times Mixins 0.1.0`. The mod state table in any crash report or
-`fml-*-latest.log` lists `mtmixins{0.1.0}` next to `mtmixins-0.2.0.jar`.
-
-**Verify (after).** The same places show 0.2.0. `acceptableRemoteVersions = "*"`, so mixed
-client/server versions still connect.
+**Regression.** `acceptableRemoteVersions = "*"`, so a client on either jar joins a server on either jar.
 
 ---
 
-## 8. DragonBridge fail-closed messages said "inside claims"
+## 8. DragonBridge's fail-closed message said "inside claims"
 
 **File:** `bridge/DragonBridge.java`
 
-**Defect.** When Civilizations is present but `DragonPolicy` lacks the expected methods, or
-`blockChangeAllowed` throws, `blockChangeAllowed` returns `false` for every block in every location,
-since there is no policy to tell claimed land from unclaimed. The two log messages said dragon block
-changes would be refused "inside claims". An operator reading the log would not expect dragons to stop
-breaking blocks on unclaimed land too.
+**Reproduce (baseline jar).**
+1. Build Civilizations with `DragonPolicy.blockChangeAllowed` renamed (for example to
+   `blockChangeAllowedX`) and deploy it.
+2. Start the server. The log says
+   `... Dragon block protection will REFUSE all dragon block changes inside claims as a safe default ...`.
+3. On **unclaimed** land, run `/summon iceandfire:firedragon ~ ~ ~10` and provoke it into breathing fire.
+   No blocks change. The message understated what happens.
 
-**Fix.** Both messages now say every block change is refused, claimed or not. Behaviour is unchanged.
+**Expected (fixed jar).** The message says dragons will be refused every block change everywhere,
+claimed or not. Behaviour is identical: no blocks change.
 
-**Reproduce (before).** Run with a Civilizations build whose `me.qourtenay.Civilizations.compat.DragonPolicy`
-lacks `blockChangeAllowed(Object, Object, Object)` (or temporarily rename it). The log says
-"...REFUSE all dragon block changes inside claims...". A dragon breathing on unclaimed land breaks
-nothing.
+**Regression.** With the normal Civilizations jar the log shows
+`Dragon claim policy resolved from me.qourtenay.Civilizations.compat.DragonPolicy`, as in your
+attached log (line 2877).
 
-**Verify (after).** Same setup. The log says dragons will be refused every block change everywhere.
-Dragons on unclaimed land still break nothing, exactly as before.
+---
+
+## 9. Annotation processor warning on `MixinLootTableAttribution` (this branch)
+
+**File:** `mixin/vanilla/MixinLootTableAttribution.java`
+
+**Defect.** The `@Redirect` target is log4j's `Logger.warn`, which is not a Minecraft member. The mixin
+is remapped, so the annotation processor looked for an obfuscation mapping, found none, and warned
+`Unable to locate method mapping for @At(INVOKE.<target>) 'Lorg/apache/logging/log4j/Logger;warn(Ljava/lang/String;)V'`.
+The refmap had no entry for it, so runtime behaviour was already correct.
+
+**Fix.** `remap = false` on that `@At` only.
+
+**Reproduce.** `.\gradlew.bat clean build` on `main` (before this branch) prints the warning.
+
+**Expected (this branch).** No warning.
+
+**Regression.** The redirect still applies:
+1. Run `/setblock <B> minecraft:hopper`.
+2. Repeat these two commands a few times:
+   `/blockdata <B> {LootTable:"minecraft:chests/simple_dungeon"}` and
+   `/replaceitem block <B> slot.container.0 minecraft:air`.
+3. When a roll yields more than 5 distinct stacks, the log shows
+   `[Medieval Times Mixins]: Tried to over-fill a container -- table minecraft:chests/simple_dungeon | container net.minecraft.tileentity.TileEntityHopper size=5 alreadyUsed=0 | called from ...`,
+   rather than vanilla's bare line.
+
+---
+
+## 10. Offline check (no server)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\mixin-harness\run.ps1
+```
+
+This needs a JDK 11 or newer; the script finds one or takes `-Jdk <path>`. It also needs git and Maven
+Central on the first run, and takes about 20 seconds.
+
+It compiles the mixins from `96cc13c` and from the working tree, and applies each build with the real
+Mixin 0.8.7 transformer and MixinExtras 0.5.5 (the version MixinBooter 11.16 loads on your server) to
+stand-in classes that copy the method shapes of the real targets. Each fix gets a test. The final table
+must show every bug check `before FAIL / after PASS` and every regression check `PASS / PASS`, ending
+with `RESULT: every bug reproduces on the baseline, is fixed on the working tree, and nothing regressed.`
+The exit code is 0 only in that case. Fixes 7–9 are not covered; they need no harness.
