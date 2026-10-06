@@ -39,3 +39,6 @@ run/
 
 # Third-party jars dropped in for compiling against
 libs/*.jar
+
+# tools/mixin-harness downloads and build output
+tools/mixin-harness/.work/

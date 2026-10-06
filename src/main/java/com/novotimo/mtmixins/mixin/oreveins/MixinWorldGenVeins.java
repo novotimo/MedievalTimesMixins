@@ -61,7 +61,9 @@ import java.util.Random;
  *
  * <p>For columns that survive, {@code world.getBiome} is {@code isBlockLoaded} plus {@code getChunk}
  * plus a registry lookup, and the region is a single 16x16 area revisited by every overlapping vein.
- * A miss defers to the original call, so biome selection itself is untouched.
+ * A miss defers to the original call, so biome selection itself is untouched. Entries are tied to the
+ * world that produced them, because {@code WorldGenVeins} is one instance shared by every dimension
+ * (and, in singleplayer, by every save opened in the session); see {@link ChunkBiomeCache}.
  *
  * @see MixinAbstractVeinType for the companion {@code matchesBiome} cache
  */
@@ -109,13 +111,15 @@ public abstract class MixinWorldGenVeins {
             return Biomes.PLAINS;
         }
 
-        Biome cached = this.mtmixins$biomeCache.get(pos.getX(), pos.getZ());
+        // Keyed by world as well as column: this generator instance serves every dimension, and in
+        // singleplayer every save loaded in the session.
+        Biome cached = this.mtmixins$biomeCache.get(world, pos.getX(), pos.getZ());
         if (cached != null) {
             return cached;
         }
 
         Biome biome = original.call(world, pos);
-        this.mtmixins$biomeCache.put(pos.getX(), pos.getZ(), biome);
+        this.mtmixins$biomeCache.put(world, pos.getX(), pos.getZ(), biome);
         return biome;
     }
 }

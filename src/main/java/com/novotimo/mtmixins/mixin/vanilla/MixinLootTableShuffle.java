@@ -94,6 +94,10 @@ public abstract class MixinLootTableShuffle {
     @Unique
     private static long mtmixins$slotsUsed = 0L;
 
+    /** Sum of the empty slots offered across all fills, so occupancy is a ratio of like with like. */
+    @Unique
+    private static long mtmixins$slotsOffered = 0L;
+
     @Unique
     private static long mtmixins$wouldHaveOverfilled = 0L;
 
@@ -196,20 +200,27 @@ public abstract class MixinLootTableShuffle {
         // never be true: the overflow was created by vanilla's unbounded splitting, not by the
         // number of stacks the table rolled, so the pre-split count was always comfortably under
         // the slot count. It reported zero on a run where it had in fact prevented thirty.
+        //
+        // Capacity is summed alongside usage. It used to divide the running average by the slot count
+        // of whichever container happened to be the 100th, so one 12-slot bookshelf after ninety-nine
+        // 27-slot chests reported 117% occupancy.
         if (before > 0) {
             mtmixins$fills++;
             mtmixins$slotsUsed += stacks.size();
+            mtmixins$slotsOffered += emptySlots;
             if (emptySlots - stacks.size() < 1) {
                 mtmixins$wouldHaveOverfilled++;
             }
             if (mtmixins$fills == 1L || mtmixins$fills % 100L == 0L) {
                 MedievalTimesMixins.LOG.info(
                         "Loot fill: {} stacks into {} slots (target was {}). Average occupancy over "
-                                + "{} fills: {} slots, {}% of capacity. Register B20.",
+                                + "{} fills: {} slots, {}% of capacity; {} fills used every slot. "
+                                + "Register B20.",
                         stacks.size(), emptySlots, target, mtmixins$fills,
                         String.format("%.1f", mtmixins$slotsUsed / (double) mtmixins$fills),
                         String.format("%.0f", 100.0D * mtmixins$slotsUsed
-                                / (double) mtmixins$fills / Math.max(1, emptySlots)));
+                                / (double) Math.max(1L, mtmixins$slotsOffered)),
+                        mtmixins$wouldHaveOverfilled);
             }
         }
 

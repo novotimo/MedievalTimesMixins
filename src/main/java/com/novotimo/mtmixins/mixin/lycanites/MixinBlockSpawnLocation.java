@@ -1,5 +1,9 @@
 package com.novotimo.mtmixins.mixin.lycanites;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.init.Blocks;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
@@ -16,23 +20,32 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *
  * <h2>The bug</h2>
  *
- * <p>{@code BlockSpawnLocation.getSpawnPositions} sweeps a region around the player with a
- * {@code MutableBlockPos} and calls {@code isValidBlock(world, pos)} on each candidate.
- * {@code isValidBlock} then does, in order:
+ * <p>Every spawn location ends up asking the world about candidate positions through
+ * {@code World.getBlockState} and {@code World.canSeeSky}, both of which resolve through the generating
+ * chunk getter. Scanning for somewhere to put a mob therefore loads, or generates, any chunk the scan
+ * happens to reach into. Nothing about spawning requires that; the scan is looking for candidates, not
+ * committing to them. There are three routes in, checked against the 1.12.2 source from 2019 through
+ * 2.0.8.10:
  *
- * <pre>
- * world.canSeeSky(pos)        // func_175678_i - resolves through getChunk, so it generates
- * world.getBlockState(pos)    // func_180495_p - likewise
- * </pre>
- *
- * <p>Both go through the generating chunk getter, so scanning for somewhere to put a mob generates any
- * chunk the scan happens to reach into. Nothing about spawning requires that; the scan is looking for
- * candidates, not committing to them.
+ * <ul>
+ *   <li>{@code RandomSpawnLocation.getRandomYCoord} calls {@code isValidBlock} on bare random columns,
+ *       and its override starts with {@code super.isValidBlock}, which lands in
+ *       {@code BlockSpawnLocation.isValidBlock}: {@code canSeeSky}, then {@code getBlockState}.</li>
+ *   <li>{@code BlockSpawnLocation.getSpawnPositions} sweeps a box around the player and calls
+ *       {@code world.getBlockState(pos)} on <i>every</i> candidate to skip flowing liquids,
+ *       <b>before</b> it calls {@code isValidBlock}. By the time the guard below runs, that read has
+ *       already loaded or generated the chunk, so on this route the guard alone never fired.</li>
+ *   <li>{@code MaterialSpawnLocation} inherits that sweep and overrides {@code isValidBlock} without
+ *       calling {@code super}, opening with its own {@code getBlockState}. That is covered by
+ *       {@link MixinMaterialSpawnLocation}.</li>
+ * </ul>
  *
  * <h2>The fix</h2>
  *
  * <p>A position in a chunk that is not loaded is not a valid spawn location, so answer false before
- * either call can generate anything.
+ * anything can generate it, and make the sweep's liquid probe report air for such a position instead of
+ * fetching the chunk. Air passes the liquid filters and goes on to {@code isValidBlock}, where the guard
+ * rejects it.
  *
  * <p><b>This one has no trade-off</b>, which is worth saying explicitly given B12's did. A structure
  * that fails validation is not placed and never reconsidered, so refusing to generate costs real
@@ -55,5 +68,27 @@ public abstract class MixinBlockSpawnLocation {
         if (!world.isBlockLoaded(pos)) {
             cir.setReturnValue(false);
         }
+    }
+
+    /**
+     * The sweep's own reads. No ordinal: the first is the per-candidate liquid probe, the second only
+     * runs after {@code isValidBlock} said yes, i.e. on a loaded chunk, where this is a pass-through.
+     * {@code remap = true} because {@code getBlockState} is vanilla.
+     */
+    @WrapOperation(
+            method = "getSpawnPositions",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/world/World;getBlockState"
+                            + "(Lnet/minecraft/util/math/BlockPos;)Lnet/minecraft/block/state/IBlockState;",
+                    remap = true
+            )
+    )
+    private IBlockState mtmixins$dontGenerateChunksSweepingForSpawns(World world, BlockPos pos,
+                                                                     Operation<IBlockState> original) {
+        if (!world.isBlockLoaded(pos)) {
+            return Blocks.AIR.getDefaultState();
+        }
+        return original.call(world, pos);
     }
 }
