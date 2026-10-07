@@ -487,9 +487,13 @@ settings done and `/gamerule doMobLoot` true.
    - The tick time (MSPT) is higher at every check and does not level off. Within roughly 3–10 minutes
      the server falls behind ("Can't keep up!").
    - The constant cost of 20 zombies a tick is the same on both jars. Only the climb is the bug.
-5. Stop it from the same spot with `/setblock ~2 ~ ~2 minecraft:air`. Restart the server: the name never
-   shrinks, so the baseline stays slow until a restart. When both runs are done, remove the row from
-   the same spot with `/fill ~2 ~ ~2 ~22 ~ ~2 minecraft:air`.
+5. Stop it from the same spot with `/setblock ~2 ~ ~2 minecraft:air`.
+   - MSPT falls back to normal within a few seconds: the cost is paid on each lookup, and the lookups
+     have stopped.
+   - The name never shrinks, though. On the baseline, placing the Repeating block again is slow from
+     its first tick, so restart the server before the next run.
+   - When both runs are done, remove the row from the same spot with
+     `/fill ~2 ~ ~2 ~22 ~ ~2 minecraft:air`.
 
 **Expected (fixed jar).** Same steps: MSPT stays flat for the whole 10 minutes. At the same spot you can
 skip step 2: the row from the first run is still there, and running it again only says
@@ -618,8 +622,9 @@ only the message does.
   - FML logs `FML has found a non-mod file DragonPolicyStub.jar ... injected into your classpath`.
   - Skip b) if another mod in the pack requires Civilizations.
 
-Also check `Dragon Griefing` in `config\iceandfire.cfg`. It must be 0 or 1. With 2, dragons never change
-blocks on any jar.
+Also check `Dragon Griefing` in `config\ice_and_fire.cfg` (category `all`). In the server folder,
+`Select-String -Path config\ice_and_fire.cfg -Pattern 'Dragon Griefing'` prints
+`I:"Dragon Griefing"=N`. N must be 0 or 1. With 2, dragons never change blocks on any jar.
 
 **Reproduce (baseline jar).**
 1. Start the server. Nothing from DragonBridge is logged yet. It logs on the first dragon breath that
