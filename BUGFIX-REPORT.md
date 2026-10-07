@@ -132,85 +132,106 @@ seen earlier in the batch are checked next.
 
 **Why the steps work.**
 - A race needs an entity to still be queued for unload when a chunk holding a copy of it loads.
-  Normally the queue is emptied at the end of the same tick.
+  Normally that queue is emptied at the end of the same tick.
 - Forge's `WorldServer.updateEntities` returns early once a world has had no players for 300 ticks (and
-  has no force-loaded chunks), so the queue is not emptied.
-- With nobody in the Overworld, an entity unloaded there stays queued. `/forge gen` can then load the
-  second chunk while it is still queued.
+  has no force-loaded chunks), so the queue is not emptied. With you in the Nether, an entity unloaded
+  in the Overworld stays queued.
+- `/forge gen` loads chunks nobody is near. It always loads at least 10, in a spiral that starts on the
+  chunk you name, and queues them for unload. Loading a chunk also cancels the queued unload of any
+  loaded neighbour (vanilla behaviour).
+- So E1's chunk must be the last chunk of the first spiral; then nothing touches it and it unloads on
+  the next tick. E2/E3's chunk must be outside that spiral, and the second spiral starts on it.
 
 **Coordinates.**
-- The steps use x=2008, which puts the stands in chunks (125, 0) and (125, 1), region file `r.3.0.mca`,
-  NBTExplorer `Chunk [29, 0]` and `Chunk [29, 1]`.
+
+| | Default | If spawn is near (see below) |
+|---|---|---|
+| E1 (chunk A) | `2008 80 8`, chunk (125, 0) | `4008 80 8`, chunk (250, 0) |
+| E2, E3 (chunk B) | `2008 80 72`, chunk (125, 4) | `4008 80 72`, chunk (250, 4) |
+| First spiral (ends on A) | `/forge gen 1968 80 16 10 0` | `/forge gen 3968 80 16 10 0` |
+| Second spiral (starts on B) | `/forge gen 2008 80 72 10 0` | `/forge gen 4008 80 72 10 0` |
+| Region file | `r.3.0.mca` | `r.7.0.mca` |
+| NBTExplorer chunks | `Chunk [29, 0]`, `Chunk [29, 4]` | `Chunk [26, 0]`, `Chunk [26, 4]` |
+
 - Check the Overworld spawn: in NBTExplorer, `world\level.dat` → Data → `SpawnX`/`SpawnZ`. If that is
-  within 400 blocks of (2008, 16), use x=4008 everywhere instead. That gives chunk 250, file `r.7.0.mca`,
-  NBTExplorer `Chunk [26, 0]` / `Chunk [26, 1]`, and log lines `at 4008,80,24`.
+  within 400 blocks of (2008, 40), use the right-hand column, and read `4008` for `2008` in the log
+  lines below.
+- The first spiral starts 2 chunks west and 1 chunk south of A, which makes A its 10th and last chunk.
+  The second spiral covers z = 3 to 5 and never touches A.
 - `world` means the folder named by `level-name` in `server.properties`. A new world
   (`level-name=b15test`) is simplest. On a copy of the live world, chunk loaders such as FTB Utilities'
   can keep Overworld chunks ticking, and then no race happens.
 
 **One-time setup: make a prepared world.**
-1. Join, then run `/gamemode 3` and `/forge setdim @p 0 2008 100 16` (if you are already in the
-   Overworld: `/tp 2008 100 16`). Wait until the terrain has loaded.
+1. `view-distance` must be 4 or more (the default is 10), so that every chunk of both spirals is
+   generated while you stand there. Join, then run `/gamemode 3` and `/forge setdim @p 0 2008 100 40`
+   (if you are already in the Overworld: `/tp 2008 100 40`). Wait until the terrain has loaded.
 2. Run:
    ```
    /summon minecraft:armor_stand 2008 80 8 {CustomName:"E1",NoGravity:1b}
-   /summon minecraft:armor_stand 2008 80 24 {CustomName:"E2",NoGravity:1b}
-   /summon minecraft:armor_stand 2008 80 24 {CustomName:"E3",NoGravity:1b}
+   /summon minecraft:armor_stand 2008 80 72 {CustomName:"E2",NoGravity:1b}
+   /summon minecraft:armor_stand 2008 80 72 {CustomName:"E3",NoGravity:1b}
    ```
-   E1 is in chunk A (125, 0). E2 and E3 are in chunk B (125, 1), at the same position and in the same
-   16-block slice.
+   E1 is in chunk A. E2 and E3 are in chunk B, at the same position and in the same 16-block slice.
 3. Run `/forge setdim @p -1 0 100 0`. You are now in the Nether in spectator mode, and you will rejoin
    there.
 4. Run `/save-all`, wait 5 seconds, then `/stop` (or type `stop` in the server console). Wait until the
    server has fully stopped before opening NBTExplorer.
 5. In NBTExplorer, open `world\region\r.3.0.mca`.
    - Chunk [29, 0] → Level → Entities: set E1's `UUIDMost` to `7` and `UUIDLeast` to `7`.
-   - Chunk [29, 1] → Level → Entities: do the same for E2 and E3.
+   - Chunk [29, 4] → Level → Entities: do the same for E2 and E3.
    - Save.
 6. Rename the folder to `B15-prepared` and never start a server on it. **Before every run below**
    (six runs: the main test and two regressions, once per jar), delete `world` and copy `B15-prepared`
    to `world`. A run changes the world: it saves the race result, and the fixed jar deletes E3.
 
-**Reproduce (baseline jar, fresh copy).**
+**Reproduce (baseline jar, fresh copy).** Type each command once, in this order.
 1. Start the server and join. You are in the Nether, so the Overworld has no players.
 2. Wait 60 seconds.
-3. Run `/forge gen 2008 80 8 1 0`. It replies `Finished generating 0 new chunks (out of 1) for dimension 0.`
-   That is correct: the chunk exists, and the command still loads it and queues it for unload. Do not
-   run it again.
-4. Run `/forge gen 2008 80 24 1 0` (same reply). Chunk B loads while E1 is still queued.
+3. Run `/forge gen 1968 80 16 10 0`. It replies `Finished generating 0 new chunks (out of 10) for dimension 0.`
+   (any number is fine; 0 only means the chunks already exist). It loaded the 10 chunks, the last being
+   chunk A, so E1 joined the world. Chunk A unloads on the next tick, and E1 stays queued for unload.
+4. Run `/forge gen 2008 80 72 10 0` (same reply). Chunk B is the first chunk it loads, while E1 is
+   still queued.
 5. `logs\latest.log` now shows:
    ```
-   [Medieval Times Mixins]: Chunk unload race, not a duplicate: minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,24 ...
+   [Medieval Times Mixins]: Chunk unload race, not a duplicate: minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,72 ...
    [net.minecraft.world.WorldServer]: Keeping entity minecraft:armor_stand that already exists with UUID 00000000-0000-0007-0000-000000000007
    ```
-6. Run `/save-all flush`, then `/stop`, and wait for the server to stop. In NBTExplorer, Chunk [29, 1] → Level → Entities still holds two
-   armor stands with UUID 7/7.
+6. Run `/save-all flush`, then `/stop`, and wait for the server to stop. In NBTExplorer,
+   Chunk [29, 4] → Level → Entities still holds two armor stands with UUID 7/7.
 
 **Expected (fixed jar, fresh copy, same steps).**
 - Step 5 shows the race line, then
-  `Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,24 in overworld. ...`
-  and vanilla's `Tried to add entity minecraft:armor_stand but it was marked as removed already`.
+  `Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,72 in overworld. ...`.
+  Vanilla also logs `Tried to add entity minecraft:armor_stand but it was marked as removed already`.
 - There is no `Keeping entity` line.
-- Step 6 shows one armor stand in Chunk [29, 1].
+- Step 6 shows one armor stand in Chunk [29, 4].
 
-**If step 5 shows no race line on either jar.** Only the first race of a session is logged. Check these
-in order, then retry on a fresh copy:
-1. You are the only player online.
-2. `/forge tps` shows the Overworld at 20 TPS. If it is lower, wait longer at step 2.
-3. Chunks (125, 0) and (125, 1) hold no chests, hoppers or machines. If they do, pick another x.
-4. If all of that holds, something force-loads Overworld chunks (an FTB Utilities chunk loader, for
-   example). Repeat on a new world.
+**If step 5 looks different.**
+- *`gave a fresh UUID to minecraft:armor_stand ... at 2008,80,72`.* E1 was still loaded when chunk B
+  loaded, so the mod treated E1 and E2 as two different entities 64 blocks apart. That is correct
+  behaviour on both jars, but it is not a race. Something touched chunk A after step 3, for example:
+  - a chest or other block entity in chunk A (then pick another x and redo the setup);
+  - a command run twice or in the other order.
+- *Nothing from the mod at all.* Entity updates were still running in the Overworld. Check:
+  - you are the only player online;
+  - `/forge tps` shows the Overworld at 20 TPS (if lower, wait longer at step 2);
+  - nothing force-loads Overworld chunks, such as an FTB Utilities chunk loader (a new world avoids
+    that).
+- *`Keeping entity` (baseline) or `dropped a second copy` (fixed) without the race line.* Only the
+  first race of a session is logged, and an earlier one took that slot. The result still counts.
 
 **Regression (same result on both jars, fresh copy each).**
-1. *Plain race.* After copying, delete E3 from Chunk [29, 1] in NBTExplorer, then do steps 1–6.
+1. *Plain race.* After copying, delete E3 from Chunk [29, 4] in NBTExplorer, then do steps 1–6.
    - Step 5 shows only the race line: no drop, no `Keeping entity`.
    - Step 6 shows one armor stand.
 2. *Duplicates without a race.*
    - After joining, run `/forge setdim @p 0 0 100 0` and wait 10 seconds. A player in the Overworld
-     keeps entity updates running there.
+     keeps entity updates running there, so E1 is gone before chunk B loads.
    - Run steps 3–4.
    - The log shows
-     `Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand ... at 2008,80,24 in overworld`
+     `Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand ... at 2008,80,72 in overworld`
      and no race line for UUID `00000000-0000-0007-0000-000000000007`.
    - When you arrive in the Overworld, a `Chunk unload race` line for some other entity near the
      Overworld spawn may appear. An autosave unloaded those spawn-area chunks while the Overworld was
@@ -229,6 +250,29 @@ another reused the first dimension's biomes.
 **Fix.** Cache entries are stamped with the world that wrote them, held weakly so an unloaded world can
 still be freed. A lookup from any other world misses.
 
+**Why the steps work.**
+- Every chunk OreVeins generates overwrites the old cache, so it holds the biomes of the most recently
+  generated chunk.
+- `/forge gen` generates at least 10 chunks, in a spiral that starts on the chunk you name. A spiral
+  started 2 chunks west and 1 chunk south of a chunk T ends on T.
+- So the Nether run is a spiral that ends on T, and straight after it the Overworld run is a spiral
+  that starts on T. Overworld T is then generated right after Nether T, and on the baseline it reads
+  the Nether's biomes.
+- Only chunk T can show this. The `/fill` box below is exactly the area OreVeins writes when it
+  generates T.
+
+**Areas.** Each test uses an unexplored area with base N, a multiple of 16:
+
+| Step | Command |
+|---|---|
+| Nether run | `/forge gen <N-32> 64 <N+16> 10 -1` |
+| Overworld run | `/forge gen <N> 64 <N> 10 0` |
+| Go there | `/forge setdim @p 0 <N+16> 100 <N+16>` |
+| Check | `/fill <N+8> 32 <N+8> <N+23> 64 <N+23> minecraft:air 0 replace minecraft:sponge 0` |
+
+- Baseline: N = 56000. Fixed jar: N = 64000. Spares: 72000, then 80000.
+- Your first attempt generated the areas at 40000 and 48000, so do not reuse those on that world.
+
 **Setup (both jars).**
 1. In the server folder run:
    ```powershell
@@ -243,39 +287,45 @@ still be freed. A lookup from any other world misses.
    still says 74, stop: the test cannot show anything.
 3. Have no other players online.
 4. If a world border is configured (the worldborder mod, or `/feworldborder`, which is set separately
-   for each world), check it in **both the Overworld (0) and the Nether (-1)**.
-   - x/z 40000–40031, 48000–48031, 56000–56031 and 64000–64031 must be inside it.
-   - Replace any area that is not with an unexplored multiple of 16 that is inside, in both dimensions.
-   - Below, for each area base N (40000, 48000, 56000, 64000), replace N with its new value, and
-     N+8 / N+16 / N+23 to match.
+   for each world), every area you use must be inside it from N−200 to N+200, in **both the Overworld
+   and the Nether**. Otherwise pick other unexplored multiples of 16 for N.
 
 **Reproduce (baseline jar).**
-1. Run `/forge gen 40000 64 40000 1 -1`. This generates and populates Nether chunk (2500, 2500).
-2. Straight after, run `/forge gen 40000 64 40000 1 0`. This does the same in the Overworld.
-   - Each must reply `Finished generating 1 new chunks (out of 1)`.
-   - `0 new chunks` means the area was not fresh. Pick another area.
-3. Run `/gamemode 3`, then `/forge setdim @p 0 40016 100 40016` (if you are already in the Overworld:
-   `/tp 40016 100 40016`).
-4. Run `/fill 40008 32 40008 40023 64 40023 minecraft:air 0 replace minecraft:sponge 0`.
+1. Stand still, in terrain that already exists, from now until step 3 finishes. Nothing else may
+   generate a chunk between steps 2 and 3.
+2. Run `/forge gen 55968 64 56016 10 -1` and wait for
+   `Finished generating 9 new chunks (out of 10) for dimension -1.` On unexplored land the count is 9 or
+   10. A lower count means part of the area existed already: use the next spare area.
+3. Straight after, run `/forge gen 56000 64 56000 10 0`. Again it must report 9 or 10 new chunks.
+4. Run `/gamemode 3`, then `/forge setdim @p 0 56016 100 56016` (if you are already in the Overworld:
+   `/tp 56016 100 56016`).
+5. Run `/fill 56008 32 56008 56023 64 56023 minecraft:air 0 replace minecraft:sponge 0`.
    - It reports **N blocks filled, with N > 0**: sponge in Overworld stone, placed by a vein that
      requires a Nether biome.
-   - If it says `No blocks filled`, something else generated chunks between steps 1 and 2. Repeat at
-     another fresh area before concluding anything: 56000 / 56008 / 56016 / 56023, then 64000 / 64008 /
-     64016 / 64023, in the same places as 40000 / 40008 / 40016 / 40023.
+   - Do not widen the box. The other chunks of the spiral were not generated straight after their
+     Nether twin, so they show nothing on either jar.
+   - If it says `No blocks filled`, something generated a chunk between steps 2 and 3, such as another
+     player or you moving into new terrain. Repeat with a spare area before concluding anything.
 
-**Expected (fixed jar, a different fresh area).**
+**Expected (fixed jar).**
 ```
-/forge gen 48000 64 48000 1 -1
-/forge gen 48000 64 48000 1 0
+/forge gen 63968 64 64016 10 -1
+/forge gen 64000 64 64000 10 0
 /gamemode 3
-/forge setdim @p 0 48016 100 48016
-/fill 48008 32 48008 48023 64 48023 minecraft:air 0 replace minecraft:sponge 0
+/forge setdim @p 0 64016 100 64016
+/fill 64008 32 64008 64023 64 64023 minecraft:air 0 replace minecraft:sponge 0
 ```
-The last command reports **No blocks filled**.
+Both `/forge gen` commands report 9 or 10 new chunks, and the `/fill` reports **No blocks filled**.
+
+**Spare areas.**
+- 72000: `/forge gen 71968 64 72016 10 -1`, `/forge gen 72000 64 72000 10 0`, then go to
+  `72016 100 72016` and `/fill 72008 32 72008 72023 64 72023 minecraft:air 0 replace minecraft:sponge 0`.
+- 80000: `/forge gen 79968 64 80016 10 -1`, `/forge gen 80000 64 80000 10 0`, then go to
+  `80016 100 80016` and `/fill 80008 32 80008 80023 64 80023 minecraft:air 0 replace minecraft:sponge 0`.
 
 **Regression (same result on both jars).**
-1. Run `/forge setdim @p -1 40016 100 40016` (on the fixed jar: `48016 100 48016`). Then run the same
-   `/fill` as above in the Nether. N > 0, so the vein still generates where it should.
+1. Run `/forge setdim @p -1 56016 100 56016` (fixed jar: `64016 100 64016`). Then run the same `/fill` as
+   above in the Nether. N > 0, so the vein still generates where it should.
 2. Delete `config\oreveins\mtmixins_repro.json` when you are done.
 
 ---
