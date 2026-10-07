@@ -146,6 +146,7 @@ seen earlier in the batch are checked next.
 
 | | Default | If spawn is near (see below) |
 |---|---|---|
+| Stand at (setup step 1) | `2008 100 40` | `4008 100 40` |
 | E1 (chunk A) | `2008 80 8`, chunk (125, 0) | `4008 80 8`, chunk (250, 0) |
 | E2, E3 (chunk B) | `2008 80 72`, chunk (125, 4) | `4008 80 72`, chunk (250, 4) |
 | First spiral (ends on A) | `/forge gen 1968 80 16 10 0` | `/forge gen 3968 80 16 10 0` |
@@ -154,8 +155,8 @@ seen earlier in the batch are checked next.
 | NBTExplorer chunks | `Chunk [29, 0]`, `Chunk [29, 4]` | `Chunk [26, 0]`, `Chunk [26, 4]` |
 
 - Check the Overworld spawn: in NBTExplorer, `world\level.dat` → Data → `SpawnX`/`SpawnZ`. If that is
-  within 400 blocks of (2008, 40), use the right-hand column, and read `4008` for `2008` in the log
-  lines below.
+  within 400 blocks of (2008, 40), use the right-hand column, and read `4008` for `2008` in every
+  command and log line below.
 - The first spiral starts 2 chunks west and 1 chunk south of A, which makes A its 10th and last chunk.
   The second spiral covers z = 3 to 5 and never touches A.
 - `world` means the folder named by `level-name` in `server.properties`. A new world
@@ -209,18 +210,32 @@ seen earlier in the batch are checked next.
 - Step 6 shows one armor stand in Chunk [29, 4].
 
 **If step 5 looks different.**
-- *`gave a fresh UUID to minecraft:armor_stand ... at 2008,80,72`.* E1 was still loaded when chunk B
-  loaded, so the mod treated E1 and E2 as two different entities 64 blocks apart. That is correct
-  behaviour on both jars, but it is not a race. Something touched chunk A after step 3, for example:
-  - a chest or other block entity in chunk A (then pick another x and redo the setup);
-  - a command run twice or in the other order.
-- *Nothing from the mod at all.* Entity updates were still running in the Overworld. Check:
+- *`dropped a second copy ... at 2008,80,72` on the baseline jar, or on the fixed jar with
+  `0 unload races skipped` and no race line.* No race happened: E1 had already left the world when
+  chunk B loaded. That is regression 2's result, so the run proves nothing. Either entity updates were
+  still running in the Overworld, or the step 4 command ran before the step 3 command. Check that:
   - you are the only player online;
   - `/forge tps` shows the Overworld at 20 TPS (if lower, wait longer at step 2);
   - nothing force-loads Overworld chunks, such as an FTB Utilities chunk loader (a new world avoids
     that).
-- *`Keeping entity` (baseline) or `dropped a second copy` (fixed) without the race line.* Only the
-  first race of a session is logged, and an earlier one took that slot. The result still counts.
+
+  Then redo the run on a fresh copy.
+- *`gave a fresh UUID to minecraft:armor_stand ... at 2008,80,72`.* E1 was still in the world, and not
+  queued for unload, when chunk B loaded. So the mod treated E1 and E2 as two entities 64 blocks apart:
+  correct on both jars, but not a race. Either chunk A was kept loaded after step 3 (another player or a
+  chunk loader near it), or something loaded it again after it unloaded (then a
+  `Chunk unload race ... at 2008,80,8` line comes first). If you are alone and nothing force-loads
+  Overworld chunks, pick another x and redo the setup.
+- *`Keeping entity` (baseline) without the race line, or `dropped a second copy` (fixed) with 1 or
+  more `unload races skipped` and no race line.* Only the first race of a session is logged, and an
+  earlier one took that slot (it is the earlier `Chunk unload race` line in the log). The result still
+  counts.
+- *`Keeping entity` on the fixed jar.* The B15 mixin is not running. Either the fixed jar is not the
+  only `mtmixins*.jar` in `mods\`, or `config\mixinbooter.cfg` disables
+  `mixins.mtmixins.entitydupe.json`.
+- *Nothing from the mod and no `Keeping entity`.* Chunk B never loaded with the edited copies. In
+  NBTExplorer, E1, E2 and E3 must each show `UUIDMost` 7 and `UUIDLeast` 7. Also check that the two
+  `/forge gen` lines were typed exactly.
 
 **Regression (same result on both jars, fresh copy each).**
 1. *Plain race.* After copying, delete E3 from Chunk [29, 4] in NBTExplorer, then do steps 1–6.
@@ -270,7 +285,9 @@ still be freed. A lookup from any other world misses.
 | Go there | `/forge setdim @p 0 <N+16> 100 <N+16>` |
 | Check | `/fill <N+8> 32 <N+8> <N+23> 64 <N+23> minecraft:air 0 replace minecraft:sponge 0` |
 
-- Baseline: N = 56000. Fixed jar: N = 64000. Spares: 72000, then 80000.
+- Baseline: N = 56000. Fixed jar: N = 64000. Spares: 72000, 80000, 88000, then 96000.
+- For the log check in step 5, the test chunk is [N/16, N/16]: [3500, 3500] for 56000, [4000, 4000]
+  for 64000, and [4500, 4500], [5000, 5000], [5500, 5500], [6000, 6000] for the spares.
 - Your first attempt generated the areas at 40000 and 48000, so do not reuse those on that world.
 
 **Setup (both jars).**
@@ -304,8 +321,16 @@ still be freed. A lookup from any other world misses.
      requires a Nether biome.
    - Do not widen the box. The other chunks of the spiral were not generated straight after their
      Nether twin, so they show nothing on either jar.
-   - If it says `No blocks filled`, something generated a chunk between steps 2 and 3, such as another
-     player or you moving into new terrain. Repeat with a spare area before concluding anything.
+   - If it says `No blocks filled`, this run proves nothing. Repeat with a spare area before
+     concluding anything. There are two causes:
+     - Something generated a chunk between steps 2 and 3, such as another player or you moving into
+       new terrain.
+     - Another mod's worldgen generated a chunk next to T in the middle of T's own generation
+       (cascading worldgen). This pack does that, and standing still cannot prevent it.
+
+     To check for the second cause, run in the server folder
+     `Select-String -Path logs\latest.log -Pattern 'while populating chunk \[3500, 3500\]'`. Any line
+     confirms it. No line does not rule it out, because Ice and Fire hides its own.
 
 **Expected (fixed jar).**
 ```
@@ -315,13 +340,19 @@ still be freed. A lookup from any other world misses.
 /forge setdim @p 0 64016 100 64016
 /fill 64008 32 64008 64023 64 64023 minecraft:air 0 replace minecraft:sponge 0
 ```
-Both `/forge gen` commands report 9 or 10 new chunks, and the `/fill` reports **No blocks filled**.
+Both `/forge gen` commands report 9 or 10 new chunks, and the `/fill` reports **No blocks filled**. If
+`Select-String -Path logs\latest.log -Pattern 'while populating chunk \[4000, 4000\]'` prints a line,
+cascading worldgen disturbed this run too and it proves nothing: repeat it on a spare area.
 
 **Spare areas.**
 - 72000: `/forge gen 71968 64 72016 10 -1`, `/forge gen 72000 64 72000 10 0`, then go to
   `72016 100 72016` and `/fill 72008 32 72008 72023 64 72023 minecraft:air 0 replace minecraft:sponge 0`.
 - 80000: `/forge gen 79968 64 80016 10 -1`, `/forge gen 80000 64 80000 10 0`, then go to
   `80016 100 80016` and `/fill 80008 32 80008 80023 64 80023 minecraft:air 0 replace minecraft:sponge 0`.
+- 88000: `/forge gen 87968 64 88016 10 -1`, `/forge gen 88000 64 88000 10 0`, then go to
+  `88016 100 88016` and `/fill 88008 32 88008 88023 64 88023 minecraft:air 0 replace minecraft:sponge 0`.
+- 96000: `/forge gen 95968 64 96016 10 -1`, `/forge gen 96000 64 96000 10 0`, then go to
+  `96016 100 96016` and `/fill 96008 32 96008 96023 64 96023 minecraft:air 0 replace minecraft:sponge 0`.
 
 **Regression (same result on both jars).**
 1. Run `/forge setdim @p -1 56016 100 56016` (fixed jar: `64016 100 64016`). Then run the same `/fill` as
