@@ -215,7 +215,9 @@ seen earlier in the batch are checked next.
   chunk B loaded. That is regression 2's result, so the run proves nothing. Either entity updates were
   still running in the Overworld, or the step 4 command ran before the step 3 command. Check that:
   - you are the only player online;
-  - `/forge tps` shows the Overworld at 20 TPS (if lower, wait longer at step 2);
+  - the `Overall` line of `/forge tps` shows a mean TPS of 5 or more, so the 60-second wait covered
+    the 300 empty ticks Forge needs (if lower, wait longer at step 2). The `Dim 0` line reads 20
+    whenever the Overworld itself is idle, so it tells you nothing here;
   - nothing force-loads Overworld chunks, such as an FTB Utilities chunk loader (a new world avoids
     that).
 
@@ -392,32 +394,44 @@ cascading worldgen disturbed this run too and it proves nothing: repeat it on a 
    - `/gamerule doMobSpawning` prints true.
    - In `config\lycanitesmobs\spawning.cfg`, `Disable Spawning` is false.
    - `config\lycanitesmobs\globalspawner.json`, if present, has `"conditions": []`.
-4. Restart. Type `/lm spawner test mtrepro` and press Tab: all three names must be offered.
+4. Restart. Type `/lm spawner test mtrepro` and press Tab twice. The first press completes it to
+   `mtrepro_`. The second prints `mtrepro_block, mtrepro_material, mtrepro_random` in chat, in any
+   order. If a name is missing, `logs\latest.log` has `Parsing error loading JSON` or
+   `There was a problem loading JSON` with that file's name.
 
 **Reproduce (baseline jar).**
-1. Go to the Overworld at least 300 blocks from world spawn (spawn chunks are always loaded), into
-   terrain that already exists. Stand still until chunks stop loading.
+1. Run `/gamemode 3` and stay in spectator mode for the rest of this section. Go to the Overworld at
+   least 300 blocks from world spawn (spawn chunks are always loaded), into terrain that already exists,
+   at ground level. Stand still for at least 10 seconds, until chunks stop loading.
+   - In survival or creative, vanilla mob spawning and pathfinding load chunks beyond your view
+     distance. A wandering enderman loads everything within 72 blocks.
+   - With saving off, such a load would still be there at step 6. Vanilla spawns no mobs around a
+     spectator, and mobs near a spectator stop wandering after 5 seconds.
 2. Run `/save-all` and wait 2 seconds. This unloads everything outside your view distance that something
    else had loaded.
 3. Run `/testforblock ~80 ~ ~ minecraft:stone`. It reports **"Cannot test for block outside of the world"**.
    That spot is always exactly 5 chunks away and is the last column the sweep reads. If it names a
    block instead, walk another 300 blocks and repeat from step 2.
-4. Run `/save-off`. While saving is off the server neither autosaves nor unloads chunks, so whatever
-   the next step loads stays loaded until you check it. Otherwise the 45-second autosave can unload it
-   first.
+4. Run `/save-off`, wait 30 seconds, then run the step-3 command again.
+   - It must still say "Cannot test for block outside of the world". If it names a block, something
+     other than Lycanites loaded the chunk: run `/save-on`, move 300 blocks and repeat from step 2.
+   - While saving is off the server neither autosaves nor unloads chunks, so whatever the next step
+     loads stays loaded until you check it. Otherwise the 45-second autosave can unload it first.
+   - Do steps 5 and 6 straight away.
 5. Run `/lm spawner test mtrepro_block`. The server may freeze for a few seconds while it loads or
    generates about 70 chunks.
 6. Run `/testforblock ~80 ~ ~ minecraft:stone` again. It now names the block there (`The block at ...
    is ...` or `Successfully found the block at ...`): the sweep loaded the chunk, or generated it.
 7. Run `/save-on`.
-8. Walk 300 blocks further and repeat steps 2–7 with `/lm spawner test mtrepro_material`. Same result.
+8. Move 300 blocks further and repeat steps 2–7 with `/lm spawner test mtrepro_material`. Same result.
 
 **Expected (fixed jar, new spots).** Same steps. Step 6 still says **"Cannot test for block outside of
-the world"** for both spawners, and there is no freeze.
+the world"** for both spawners, and there is no freeze. If step 6 names a block even though the
+step-4 recheck passed, repeat at one more spot before concluding the fix failed.
 
 **Regression (same result on both jars).**
-1. *Random path.* Walk 300 blocks further and do steps 2–4. Then run `/lm spawner test mtrepro_random`,
-   then steps 6–7.
+1. *Random path.* Move 300 blocks further (still in spectator mode) and do steps 2–4. Then run
+   `/lm spawner test mtrepro_random`, then steps 6–7.
    - Step 6 still says "outside of the world" on *both* jars.
    - About 20 of the 3000 columns fall in that chunk, and the `isValidBlock` guard (already present at
      baseline) keeps them from loading it.
@@ -444,9 +458,13 @@ the world"** for both spawners, and there is no freeze.
 
 **Fix.** The table is marked shared once and then left alone.
 
-`/kill` on this server is ForgeEssentials' and only kills players. So the zombies below are given
-an instant-health effect (which damages undead), and they die on their first tick. Every death looks up
-the zombie's loot table.
+Two ForgeEssentials details shape the steps:
+- `/kill` on this server is ForgeEssentials' and only kills players. So the zombies below are given an
+  instant-health effect (which damages undead), and they die on their first tick. Every death looks up
+  the zombie's loot table.
+- The zombies are summoned by command blocks directly, not through `/execute`. ForgeEssentials runs the
+  command inside `/execute` as an NPC named after the entity, refuses `summon` for it, and says
+  nothing.
 
 **Reproduce (baseline jar).** Use flat, unclaimed Overworld ground, with section 0.2's command-block
 settings done and `/gamerule doMobLoot` true.
@@ -454,24 +472,28 @@ settings done and `/gamerule doMobLoot` true.
    - The zombie dies at once.
    - This names the empty table `mtmixins:missing_b`. In step 3, the first lookup of
      `mtmixins:missing_a` marks it shared. From then on the baseline appends to the name on every lookup.
-2. Without moving, run this **20 times**:
-   `/summon minecraft:armor_stand ~ ~3 ~6 {CustomName:"lr",NoGravity:1b,Invisible:1b,Marker:1b}`
-3. Without moving, run
-   `/setblock ~2 ~ ~2 repeating_command_block 5 replace {auto:1b,Command:"execute @e[name=lr] ~ ~ ~ summon zombie ~ ~ ~ {DeathLootTable:\"mtmixins:missing_a\",NoAI:1b,Silent:1b,ActiveEffects:[{Id:6b,Amplifier:5b,Duration:1}]}"}`.
-   - It starts at once: 20 zombies spawn and die every tick, which is 20 lookups of a missing table per
-     tick.
+2. Without moving, run
+   `/fill ~3 ~ ~2 ~22 ~ ~2 chain_command_block 5 replace {auto:1b,Command:"summon zombie ~ ~3 ~4 {DeathLootTable:\"mtmixins:missing_a\",NoAI:1b,Silent:1b,ActiveEffects:[{Id:6b,Amplifier:5b,Duration:1}]}"}`.
+   It reports `20 blocks filled`: a row of 20 Chain blocks, idle until triggered, each summoning one
+   zombie.
+3. Without moving, run `/setblock ~2 ~ ~2 repeating_command_block 5 replace {auto:1b}`.
+   - It starts at once and triggers the row every tick: 20 zombies spawn and die every tick, which is
+     20 lookups of a missing table per tick.
    - The log shows `Couldn't find resource table mtmixins:missing_a` once. That confirms the lookups
      are happening.
+   - If that line is not there within a few seconds, no zombies are being summoned, and the run shows
+     nothing on either jar.
 4. Run `/spark tps` (or `/forge tps`) right away, then every 2 minutes for 10 minutes.
    - The tick time (MSPT) is higher at every check and does not level off. Within roughly 3–10 minutes
      the server falls behind ("Can't keep up!").
    - The constant cost of 20 zombies a tick is the same on both jars. Only the climb is the bug.
 5. Stop it from the same spot with `/setblock ~2 ~ ~2 minecraft:air`. Restart the server: the name never
-   shrinks, so the baseline stays slow until a restart.
+   shrinks, so the baseline stays slow until a restart. When both runs are done, remove the row from
+   the same spot with `/fill ~2 ~ ~2 ~22 ~ ~2 minecraft:air`.
 
-**Expected (fixed jar).** Same steps: MSPT stays flat for the whole 10 minutes. On the same world, skip
-step 2. The 20 `lr` armor stands from the first run are still there, and summoning 20 more would make
-40 zombies a tick.
+**Expected (fixed jar).** Same steps: MSPT stays flat for the whole 10 minutes. At the same spot you can
+skip step 2: the row from the first run is still there, and running it again only says
+`No blocks filled`.
 
 **Regression (both jars): real tables are still named.** Section 9's regression shows
 `table minecraft:chests/simple_dungeon`.
