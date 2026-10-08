@@ -75,69 +75,82 @@ by hand:
 before it.
 
 **How the test works.**
-- It makes 2,000 lookups of a missing loot table in a single tick and times that tick with spark.
-  - On the baseline, each round of 2,000 takes longer than the one before.
-  - On the fixed jar, a round takes no longer than a control round that has no loot table.
-- The lookups come from containers, not mobs, so nothing drops and nothing piles up. An empty loot
-  table produces no items, and nothing runs every tick except the hoppers.
-- How the 2,000 lookups happen:
+- It rolls 2,000 loot tables in a single tick and times that tick with spark.
+  - A *round* rolls the missing table `mtmixins:missing_a`.
+  - A *control* rolls vanilla's real, empty table `minecraft:empty`. That is the same work per
+    container but a different table, which nothing ever renames.
+  - On the baseline the rounds climb far above the controls. On the fixed jar they stay level with
+    them.
+- No mobs and no items are involved. An empty table produces nothing, and the only thing that runs
+  every tick is a field of idle hoppers.
+- How a tick rolls 2,000 tables:
   - A hopper looks into the container above it every tick.
-  - Looking into a dispenser or dropper rolls its loot table first, which is one lookup.
-  - So placing 2,000 dispensers that carry a loot table on top of 2,000 hoppers gives 2,000 lookups
-    in that tick.
-  - Placing droppers over the dispensers, and back, places a fresh set and re-arms the layer with
-    one command each time.
+  - Looking into a dispenser rolls its loot table first.
+  - So a layer of 2,000 dispensers on 2,000 hoppers rolls 2,000 tables in the tick the layer gets them.
+  - Each `/fill` re-arms the layer by flipping the dispensers between facing down (`0`) and facing up
+    (`1`). Lootr's default config never converts dispensers, so it stays out of the way.
 
 **Setup (once, for both jars).** Pick flat, unclaimed ground that already exists, at least 45 × 55
-blocks, with nothing on it you want to keep: the commands replace two layers of blocks there. Stand at
-the north-west corner; the area runs east and south of you.
+blocks, with nothing on it you want to keep: the commands replace blocks there. Stand at the north-west
+corner; the area runs east and south of you.
 
 Every command in this section is relative to where you stand, so stay on this spot until both jars are
 done. When you restart the server, log out without moving: you rejoin where you logged out. Run:
 1. `/fill ~3 ~ ~3 ~42 ~ ~52 minecraft:hopper`. It reports `2000 blocks filled`.
-2. `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dropper`. It reports `2000 blocks filled`. The droppers sit on
-   the hoppers; neither has a loot table yet.
+2. `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 0`. It reports `2000 blocks filled`. The dispensers
+   sit on the hoppers, facing down, with no loot table yet.
 
 **Reproduce (baseline jar, freshly started server).** Without moving:
-1. Run `/spark tickmonitor --threshold-tick 100` and wait for `Analysis is now complete` (about 6
-   seconds).
-   - From then on it prints `Tick #... lasted N ms` for every tick over 100 ms.
-   - If it prints such lines while you do nothing, run `/spark tickmonitor` again to stop it. Then
-     start it with a higher threshold (200, 300, ...) until it stays quiet.
-2. *Control: the same placement, no loot table.* Run `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser`.
-   Wait 5 seconds, then run `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dropper`. Note what the monitor
-   reports for these two: usually nothing, or one short tick. That is the cost of the placement alone.
-3. *Mark the empty table shared.* Run
-   `/setblock ~-2 ~ ~ minecraft:dispenser 0 replace {LootTable:"mtmixins:missing_b"}`, then
-   `/replaceitem block ~-2 ~ ~ slot.container.0 minecraft:air`.
+1. Run `/save-off`. It replies `Turned off world auto-saving`. Otherwise spark reports the 45-second
+   autosave as if it were a round. Stopping the server still saves everything.
+2. Run `/spark tickmonitor --threshold-tick 100 --without-gc`. Wait for `Analysis is now complete`
+   (about 6 seconds), then watch for 60 seconds.
+   - From then on it prints `Tick #... lasted N ms` for every tick over 100 ms. Spark counts from one
+     tick's start to the next, so an idle tick reads about 50 ms.
+   - If `lasted` lines appear while you do nothing, run `/spark tickmonitor` to stop it and start it
+     again with `--threshold-tick 150`. Do not go higher, or the first baseline rounds will not show.
+3. *Opening control.* Run `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 1 replace {LootTable:"minecraft:empty"}`.
+   Wait 5 seconds, then run `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 0 replace {LootTable:"minecraft:empty"}`.
+   - The line that belongs to a `/fill` is the one printed right after its `2000 blocks filled`. For a
+     control it is usually no line at all, or a short one.
+   - The log must never show `Couldn't find resource table minecraft:empty`.
+4. *Mark the empty table shared.* Run
+   `/setblock ~ ~ ~2 minecraft:dispenser 0 replace {LootTable:"mtmixins:missing_b"}`, then
+   `/replaceitem block ~ ~ ~2 slot.container.0 minecraft:air`.
    - The log must show `Couldn't find resource table mtmixins:missing_b`.
-   - Without it, the next step's lookups all use one name and the baseline never grows.
-4. Run these two commands alternately, 8 in total, about 5 seconds apart:
+   - Without it, the rounds below all use one name and the baseline never grows.
+5. *Rounds.* Run these two commands alternately, 6 in total, about 5 seconds apart:
    ```
+   /fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 1 replace {LootTable:"mtmixins:missing_a"}
    /fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 0 replace {LootTable:"mtmixins:missing_a"}
-   /fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dropper 0 replace {LootTable:"mtmixins:missing_a"}
    ```
-   Each is one round of 2,000 lookups. The log shows `Couldn't find resource table mtmixins:missing_a`
-   once.
+   - The log shows `Couldn't find resource table mtmixins:missing_a` once.
+   - If a `/fill` says `No blocks filled`, you ran the same facing twice in a row. Run the other one.
+   - After the first round, run `/blockdata ~42 ~1 ~52 {}`. It changes nothing and replies
+     `The data tag did not change: {...}` with that dispenser's data, which should not contain
+     `LootTable`. If it does, the hoppers are not looking into the dispensers every tick. The test
+     still works one round late, because each `/fill` rolls the previous round's tables as it empties
+     the dispensers. Run one extra round and read the trend from round 2.
+6. *Closing control.* Run the two commands of step 3 again.
+7. Run `/spark tickmonitor` (it stops the monitor), `/setblock ~ ~ ~2 minecraft:air` and `/save-on`.
+   Restart the server before running the other jar. The name lives until a restart.
 
-   After the first round, check that the hoppers really rolled the tables: run
-   `/blockdata ~42 ~1 ~52 {}`. It changes nothing and replies `The data tag did not change: {...}` with
-   that container's data. The text must not contain `LootTable`. If it does, hoppers on this server do
-   not look into containers every tick, so no lookups happened and the test shows nothing on either
-   jar.
-5. The monitor reports every round, and the rounds get longer as you go.
-   - For scale: the baseline's 2,000 lookups alone took 0.1 s in the first round, rising to 0.6 s
-     in the eighth, on Java 8 with Aikar's flags. That was measured by replaying the exact string
-     building from both revisions.
-   - Garbage collection makes single rounds jump around. The trend and the gap to the control are
-     what matter.
-   - Tick times go back to normal after the last round, because the cost is paid per lookup.
-6. Run `/spark tickmonitor` (it stops the monitor) and `/setblock ~-2 ~ ~ minecraft:air`. Leave the
-   hoppers and droppers for the other jar. Restart the server before running the other jar, because
-   the name lives until a restart.
+**What the baseline shows.**
+- The rounds' lines are far above the opening control, and they trend upward. A single round can come
+  out shorter than the one before it.
+- For scale, the baseline's own bytecode replayed on Java 8 with Aikar's flags:
 
-**Expected (fixed jar, freshly started server).** Same steps. The rounds in step 4 take no longer than
-the control in step 2, and they do not grow. The 2,000 lookups themselves cost under a millisecond.
+  | Round | 1 | 2 | 3 | 4 | 5 | 6 |
+  |---|---|---|---|---|---|---|
+  | Extra time per round | 0.11 s | 0.32 s | 0.37 s | 0.57 s | 0.71 s | 0.86 s |
+
+  Your machine will differ; judge the trend and the gap to the controls.
+- The closing control drops back to the opening control's level: only missing-table lookups got slower.
+- Tick times between rounds stay normal, because the cost is paid per lookup.
+
+**Expected (fixed jar, freshly started server).** Same steps. All six rounds are about the same as the
+controls, with no upward trend. On most machines the monitor prints nothing for any of them. Round 1
+can be the slowest: that is the JIT warming up.
 
 **Clean up (after both jars).** From the same spot, run `/fill ~3 ~ ~3 ~42 ~1 ~52 minecraft:air`.
 
