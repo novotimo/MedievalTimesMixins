@@ -1,11 +1,13 @@
 # Bug fix report
 
-Fixes 1–8 were merged in PR #1 (baseline `96cc13c`). Fix 9, `tools\build-jars.ps1` and the PowerShell
-harness are on branch `claude/tender-edison-ygomlf`. Check that branch out before 0.1.
+B18, B15, B2b and B13 are confirmed fixed in game and are no longer listed. The fixes below were merged
+in PR #1 (baseline `96cc13c`), except the annotation-processor fix (section 5). That fix,
+`tools\build-jars.ps1` and the PowerShell harness are on branch `claude/tender-edison-ygomlf`. Check
+that branch out before 0.1.
 
 Each section has numbered in-game steps. **Reproduce** runs them on the baseline jar (the bug shows).
 **Expected** runs them on the fixed jar (the bug is gone). **Regression** gives the same result on both
-jars. Section 10 runs the same before/after check offline.
+jars. Section 6 runs the same before/after check offline.
 
 ## 0. Setup
 
@@ -43,468 +45,108 @@ by hand:
 - **Server and jars.** Use a copy of the server folder, not production. To switch builds: stop the
   server, delete every `mtmixins*.jar` from `mods\`, copy in exactly one of the two jars, start.
 - **Permissions and config.**
-  - You need op level 4 (`/forge gen` requires it; it is the dedicated-server default).
+  - You need to be an op (the dedicated-server default level, 4, covers every command here).
   - `config\mixinbooter.cfg` must not blacklist any `mixins.mtmixins.*.json`.
-  - Delete `config\mtmixins-collisions.properties` unless a step says otherwise.
 - **Creating files.** Use Notepad (UTF-8), or the `Set-Content -Encoding Ascii` commands given. Never
   use `>` or `Out-File` in Windows PowerShell 5.1. They write UTF-16, which these mods cannot read, and
   some of them fail silently.
-- **ForgeEssentials commands.** On this server `/tp`, `/gamemode`, `/kill` and `/time` are
-  ForgeEssentials commands. The steps only use:
-  - `/gamemode 0|1|3`;
-  - `/tp <x> <y> <z>`, which stays in your current dimension;
-  - `/forge setdim @p <dim> <x> <y> <z>` to change dimension. It refuses if you are already in that
-    dimension; use `/tp` then.
-
-  Your spawn is ForgeEssentials world 10, not the Overworld (0). Type every command in chat.
+- **Commands.** Type every command in chat. `/gamemode` on this server is ForgeEssentials'. It accepts
+  the numbers 0, 1 and 3.
 - **Relative coordinates.** Some steps use `~` positions in several commands in a row. Do not move
   between those commands.
-- **Command blocks (sections 5 and 6).** Set `enable-command-block=true` in `server.properties` before
+- **Command blocks (section 2).** Set `enable-command-block=true` in `server.properties` before
   starting. In game, run `/gamerule commandBlockOutput false` and `/gamerule logAdminCommands false`.
   Without these, every command a block runs is echoed to chat and to the log. The blocks are placed with
   `/setblock`, so you need no GUI and no creative mode.
 
 ---
 
-## 1. B18: a minecart stops being pushable after 8 pushes
-
-**Files:** `mixin/vanilla/MixinEntityCollisionCount.java`, `mixin/vanilla/MixinEntityLivingBaseCollisions.java`
-
-**Defect.**
-- The per-tick push counter was reset at the head of `Entity.onUpdate`. `EntityMinecart.onUpdate`
-  never calls `super.onUpdate()`, so a minecart's counter only ever went up.
-- A push is refused when *either* entity is at the cap. After 8 pushes the cart therefore refused every
-  push from a player or mob until its chunk unloaded.
-- A stationary cart only collides with other carts in its own tick, so nothing else moved it either.
-
-**Fix.** The counter is stamped with `world.getTotalWorldTime()` and reads as 0 in any other tick.
-
-**Reproduce (baseline jar).**
-1. Go to the Overworld, at least 300 blocks from world spawn on X or Z (spawn chunks never unload), on
-   flat open ground. Be in survival or creative, not spectator.
-2. Run `/save-on`, then `/summon minecraft:minecart ~3 ~ ~`.
-3. Walk into the cart, back off, and repeat.
-   - For the first one or two contacts it slides (8 ticks of contact in total, under half a second).
-   - After that it does not react to being walked into, from any side.
-4. Walk more than (view-distance + 2) × 16 blocks away, wait 5 seconds, and come back. The chunk
-   unloaded and reloaded, so the cart moves for another 8 ticks of contact, then freezes again. A
-   restart does the same.
-
-**Expected (fixed jar).** The cart slides on every contact, indefinitely. That is what you saw; your log
-is the 0.2.0 fixed build.
-
-**Regression (same result on both jars).** Each step is on open flat ground.
-1. Run `/summon minecraft:cow ~2 ~ ~` five times without moving. The cows push apart within a second.
-   Walking into one shoves it. The log has
-   `No mtmixins-collisions.properties found, so entity pushing is capped at Spigot's default of 8 ...`.
-2. Stop the server, and in the server folder run:
-   `Set-Content -Path config\mtmixins-collisions.properties -Value 'max-entity-collisions = 0' -Encoding Ascii`.
-   Start the server and repeat step 1.
-   - The cows stay stacked on one spot until they wander off.
-   - You walk through a cow without moving it.
-   - The log has `Entity pushing capped at 0 per entity per tick, from mtmixins-collisions.properties`.
-     It is written at the first collision, not at startup.
-   - If the log instead says any of these, stop the server, `cd` to the server folder, and recreate the
-     file with the command above:
-     - `No mtmixins-collisions.properties found`: the file is not in `<server folder>\config\`.
-     - `Entity pushing capped at 8`: the file was found but the key was not read (wrong encoding).
-     - `Could not read mtmixins-collisions.properties`.
-3. Do the same with `-Value 'max-entity-collisions = -1'`. Pushing is vanilla (cows push apart, walking
-   shoves them), and the log says `capped at -1`.
-4. Delete the file and restart. The result is the same as step 1.
-
----
-
-## 2. B15: a chunk-unload race let duplicate entities through
-
-**File:** `mixin/vanilla/MixinWorldServerEntityDupe.java`
-
-**Defect.**
-- An incoming entity's UUID could belong to a world entity that was queued for unload. In that case the
-  loop hit `continue` before checking the other copies in the same 16-block slice, so all copies went
-  to vanilla.
-- Vanilla swapped in the first copy and refused the rest with `Keeping entity ... that already exists`.
-  That leaves the refused copies in the chunk's entity list, so they are saved again.
-- They survive until the chunk's next load that is not itself a race. That load deletes them.
-
-**Fix.** Same order as Paper's resolver: a queued-for-unload world copy counts as absent, and the copies
-seen earlier in the batch are checked next.
-
-**Why the steps work.**
-- A race needs an entity to still be queued for unload when a chunk holding a copy of it loads.
-  Normally that queue is emptied at the end of the same tick.
-- Forge's `WorldServer.updateEntities` returns early once a world has had no players for 300 ticks (and
-  has no force-loaded chunks), so the queue is not emptied. With you in the Nether, an entity unloaded
-  in the Overworld stays queued.
-- `/forge gen` loads chunks nobody is near. It always loads at least 10, in a spiral that starts on the
-  chunk you name, and queues them for unload. Loading a chunk also cancels the queued unload of any
-  loaded neighbour (vanilla behaviour).
-- So E1's chunk must be the last chunk of the first spiral; then nothing touches it and it unloads on
-  the next tick. E2/E3's chunk must be outside that spiral, and the second spiral starts on it.
-
-**Coordinates.**
-
-| | Default | If spawn is near (see below) |
-|---|---|---|
-| Stand at (setup step 1) | `2008 100 40` | `4008 100 40` |
-| E1 (chunk A) | `2008 80 8`, chunk (125, 0) | `4008 80 8`, chunk (250, 0) |
-| E2, E3 (chunk B) | `2008 80 72`, chunk (125, 4) | `4008 80 72`, chunk (250, 4) |
-| First spiral (ends on A) | `/forge gen 1968 80 16 10 0` | `/forge gen 3968 80 16 10 0` |
-| Second spiral (starts on B) | `/forge gen 2008 80 72 10 0` | `/forge gen 4008 80 72 10 0` |
-| Region file | `r.3.0.mca` | `r.7.0.mca` |
-| NBTExplorer chunks | `Chunk [29, 0]`, `Chunk [29, 4]` | `Chunk [26, 0]`, `Chunk [26, 4]` |
-
-- Check the Overworld spawn: in NBTExplorer, `world\level.dat` → Data → `SpawnX`/`SpawnZ`. If that is
-  within 400 blocks of (2008, 40), use the right-hand column, and read `4008` for `2008` in every
-  command and log line below.
-- The first spiral starts 2 chunks west and 1 chunk south of A, which makes A its 10th and last chunk.
-  The second spiral covers z = 3 to 5 and never touches A.
-- `world` means the folder named by `level-name` in `server.properties`. A new world
-  (`level-name=b15test`) is simplest. On a copy of the live world, chunk loaders such as FTB Utilities'
-  can keep Overworld chunks ticking, and then no race happens.
-
-**One-time setup: make a prepared world.**
-1. `view-distance` must be 4 or more (the default is 10), so that every chunk of both spirals is
-   generated while you stand there. Join, then run `/gamemode 3` and `/forge setdim @p 0 2008 100 40`
-   (if you are already in the Overworld: `/tp 2008 100 40`). Wait until the terrain has loaded.
-2. Run:
-   ```
-   /summon minecraft:armor_stand 2008 80 8 {CustomName:"E1",NoGravity:1b}
-   /summon minecraft:armor_stand 2008 80 72 {CustomName:"E2",NoGravity:1b}
-   /summon minecraft:armor_stand 2008 80 72 {CustomName:"E3",NoGravity:1b}
-   ```
-   E1 is in chunk A. E2 and E3 are in chunk B, at the same position and in the same 16-block slice.
-3. Run `/forge setdim @p -1 0 100 0`. You are now in the Nether in spectator mode, and you will rejoin
-   there.
-4. Run `/save-all`, wait 5 seconds, then `/stop` (or type `stop` in the server console). Wait until the
-   server has fully stopped before opening NBTExplorer.
-5. In NBTExplorer, open `world\region\r.3.0.mca`.
-   - Chunk [29, 0] → Level → Entities: set E1's `UUIDMost` to `7` and `UUIDLeast` to `7`.
-   - Chunk [29, 4] → Level → Entities: do the same for E2 and E3.
-   - Save.
-6. Rename the folder to `B15-prepared` and never start a server on it. **Before every run below**
-   (six runs: the main test and two regressions, once per jar), delete `world` and copy `B15-prepared`
-   to `world`. A run changes the world: it saves the race result, and the fixed jar deletes E3.
-
-**Reproduce (baseline jar, fresh copy).** Type each command once, in this order.
-1. Start the server and join. You are in the Nether, so the Overworld has no players.
-2. Wait 60 seconds.
-3. Run `/forge gen 1968 80 16 10 0`. It replies `Finished generating 0 new chunks (out of 10) for dimension 0.`
-   (any number is fine; 0 only means the chunks already exist). It loaded the 10 chunks, the last being
-   chunk A, so E1 joined the world. Chunk A unloads on the next tick, and E1 stays queued for unload.
-4. Run `/forge gen 2008 80 72 10 0` (same reply). Chunk B is the first chunk it loads, while E1 is
-   still queued.
-5. `logs\latest.log` now shows:
-   ```
-   [Medieval Times Mixins]: Chunk unload race, not a duplicate: minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,72 ...
-   [net.minecraft.world.WorldServer]: Keeping entity minecraft:armor_stand that already exists with UUID 00000000-0000-0007-0000-000000000007
-   ```
-6. Run `/save-all flush`, then `/stop`, and wait for the server to stop. In NBTExplorer,
-   Chunk [29, 4] → Level → Entities still holds two armor stands with UUID 7/7.
-
-**Expected (fixed jar, fresh copy, same steps).**
-- Step 5 shows the race line, then
-  `Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand (UUID 00000000-0000-0007-0000-000000000007) at 2008,80,72 in overworld. ...`.
-  Vanilla also logs `Tried to add entity minecraft:armor_stand but it was marked as removed already`.
-- There is no `Keeping entity` line.
-- Step 6 shows one armor stand in Chunk [29, 4].
-
-**If step 5 looks different.**
-- *`dropped a second copy ... at 2008,80,72` on the baseline jar, or on the fixed jar with
-  `0 unload races skipped` and no race line.* No race happened: E1 had already left the world when
-  chunk B loaded. That is regression 2's result, so the run proves nothing. Either entity updates were
-  still running in the Overworld, or the step 4 command ran before the step 3 command. Check that:
-  - you are the only player online;
-  - the `Overall` line of `/forge tps` shows a mean TPS of 5 or more, so the 60-second wait covered
-    the 300 empty ticks Forge needs (if lower, wait longer at step 2). The `Dim 0` line reads 20
-    whenever the Overworld itself is idle, so it tells you nothing here;
-  - nothing force-loads Overworld chunks, such as an FTB Utilities chunk loader (a new world avoids
-    that).
-
-  Then redo the run on a fresh copy.
-- *`gave a fresh UUID to minecraft:armor_stand ... at 2008,80,72`.* E1 was still in the world, and not
-  queued for unload, when chunk B loaded. So the mod treated E1 and E2 as two entities 64 blocks apart:
-  correct on both jars, but not a race. Either chunk A was kept loaded after step 3 (another player or a
-  chunk loader near it), or something loaded it again after it unloaded (then a
-  `Chunk unload race ... at 2008,80,8` line comes first). If you are alone and nothing force-loads
-  Overworld chunks, pick another x and redo the setup.
-- *`Keeping entity` (baseline) without the race line, or `dropped a second copy` (fixed) with 1 or
-  more `unload races skipped` and no race line.* Only the first race of a session is logged, and an
-  earlier one took that slot (it is the earlier `Chunk unload race` line in the log). The result still
-  counts.
-- *`Keeping entity` on the fixed jar.* The B15 mixin is not running. Either the fixed jar is not the
-  only `mtmixins*.jar` in `mods\`, or `config\mixinbooter.cfg` disables
-  `mixins.mtmixins.entitydupe.json`.
-- *Nothing from the mod and no `Keeping entity`.* Chunk B never loaded with the edited copies. In
-  NBTExplorer, E1, E2 and E3 must each show `UUIDMost` 7 and `UUIDLeast` 7. Also check that the two
-  `/forge gen` lines were typed exactly.
-
-**Regression (same result on both jars, fresh copy each).**
-1. *Plain race.* After copying, delete E3 from Chunk [29, 4] in NBTExplorer, then do steps 1–6.
-   - Step 5 shows only the race line: no drop, no `Keeping entity`.
-   - Step 6 shows one armor stand.
-2. *Duplicates without a race.*
-   - After joining, run `/forge setdim @p 0 0 100 0` and wait 10 seconds. A player in the Overworld
-     keeps entity updates running there, so E1 is gone before chunk B loads.
-   - Run steps 3–4.
-   - The log shows
-     `Duplicate UUID resolved: dropped a second copy of minecraft:armor_stand ... at 2008,80,72 in overworld`
-     and no race line for UUID `00000000-0000-0007-0000-000000000007`.
-   - When you arrive in the Overworld, a `Chunk unload race` line for some other entity near the
-     Overworld spawn may appear. An autosave unloaded those spawn-area chunks while the Overworld was
-     empty; they are not part of this test.
-
----
-
-## 3. B2b: OreVeins used another world's biome
-
-**Files:** `util/ChunkBiomeCache.java`, `mixin/oreveins/MixinWorldGenVeins.java`
-
-**Defect.** `WorldGenVeins` is a single instance shared by every dimension. Its biome cache was keyed
-by chunk coordinates only. So generating chunk (X, Z) in one dimension right after the same (X, Z) in
-another reused the first dimension's biomes.
-
-**Fix.** Cache entries are stamped with the world that wrote them, held weakly so an unloaded world can
-still be freed. A lookup from any other world misses.
-
-**Why the steps work.**
-- Every chunk OreVeins generates overwrites the old cache, so it holds the biomes of the most recently
-  generated chunk.
-- `/forge gen` generates at least 10 chunks, in a spiral that starts on the chunk you name. A spiral
-  started 2 chunks west and 1 chunk south of a chunk T ends on T.
-- So the Nether run is a spiral that ends on T, and straight after it the Overworld run is a spiral
-  that starts on T. Overworld T is then generated right after Nether T, and on the baseline it reads
-  the Nether's biomes.
-- Only chunk T can show this. The `/fill` box below is exactly the area OreVeins writes when it
-  generates T.
-
-**Areas.** Each test uses an unexplored area with base N, a multiple of 16:
-
-| Step | Command |
-|---|---|
-| Nether run | `/forge gen <N-32> 64 <N+16> 10 -1` |
-| Overworld run | `/forge gen <N> 64 <N> 10 0` |
-| Go there | `/forge setdim @p 0 <N+16> 100 <N+16>` |
-| Check | `/fill <N+8> 32 <N+8> <N+23> 64 <N+23> minecraft:air 0 replace minecraft:sponge 0` |
-
-- Baseline: N = 56000. Fixed jar: N = 64000. Spares: 72000, 80000, 88000, then 96000.
-- For the log check in step 5, the test chunk is [N/16, N/16]: [3500, 3500] for 56000, [4000, 4000]
-  for 64000, and [4500, 4500], [5000, 5000], [5500, 5500], [6000, 6000] for the spares.
-- Your first attempt generated the areas at 40000 and 48000, so do not reuse those on that world.
-
-**Setup (both jars).**
-1. In the server folder run:
-   ```powershell
-   Set-Content -Encoding Ascii -Path config\oreveins\mtmixins_repro.json -Value '{"mtmixins_repro_nether_only": {"type": "cluster", "ore": "minecraft:sponge", "stone": ["minecraft:stone", "minecraft:netherrack", "minecraft:soul_sand", "biomesoplenty:flesh"], "count": 6, "rarity": 1, "min_y": 32, "max_y": 64, "horizontal_size": 16, "vertical_size": 10, "density": 80, "dimensions": [0, -1], "biomes": ["NETHER"]}}'
-   ```
-   - The vein is allowed in the Overworld and the Nether, but only in biomes tagged `NETHER`.
-   - The Overworld has none, so the vein can never legitimately place a block there.
-   - Dry sponge (meta 0) does not generate naturally.
-   - The extra stones cover Biomes O' Plenty Nether biomes that have little netherrack.
-2. Restart. `logs\latest.log` must say `[oreveins]: Registered 75 Veins Successfully.` (yours said 74
-   before), with no `Unable to open the file` and no error naming `mtmixins_repro_nether_only`. If it
-   still says 74, stop: the test cannot show anything.
-3. Have no other players online.
-4. If a world border is configured (the worldborder mod, or `/feworldborder`, which is set separately
-   for each world), every area you use must be inside it from N−200 to N+200, in **both the Overworld
-   and the Nether**. Otherwise pick other unexplored multiples of 16 for N.
-
-**Reproduce (baseline jar).**
-1. Stand still, in terrain that already exists, from now until step 3 finishes. Nothing else may
-   generate a chunk between steps 2 and 3.
-2. Run `/forge gen 55968 64 56016 10 -1` and wait for
-   `Finished generating 9 new chunks (out of 10) for dimension -1.` On unexplored land the count is 9 or
-   10. A lower count means part of the area existed already: use the next spare area.
-3. Straight after, run `/forge gen 56000 64 56000 10 0`. Again it must report 9 or 10 new chunks.
-4. Run `/gamemode 3`, then `/forge setdim @p 0 56016 100 56016` (if you are already in the Overworld:
-   `/tp 56016 100 56016`).
-5. Run `/fill 56008 32 56008 56023 64 56023 minecraft:air 0 replace minecraft:sponge 0`.
-   - It reports **N blocks filled, with N > 0**: sponge in Overworld stone, placed by a vein that
-     requires a Nether biome.
-   - Do not widen the box. The other chunks of the spiral were not generated straight after their
-     Nether twin, so they show nothing on either jar.
-   - If it says `No blocks filled`, this run proves nothing. Repeat with a spare area before
-     concluding anything. There are two causes:
-     - Something generated a chunk between steps 2 and 3, such as another player or you moving into
-       new terrain.
-     - Another mod's worldgen generated a chunk next to T in the middle of T's own generation
-       (cascading worldgen). This pack does that, and standing still cannot prevent it.
-
-     To check for the second cause, run in the server folder
-     `Select-String -Path logs\latest.log -Pattern 'while populating chunk \[3500, 3500\]'`. Any line
-     confirms it. No line does not rule it out, because Ice and Fire hides its own.
-
-**Expected (fixed jar).**
-```
-/forge gen 63968 64 64016 10 -1
-/forge gen 64000 64 64000 10 0
-/gamemode 3
-/forge setdim @p 0 64016 100 64016
-/fill 64008 32 64008 64023 64 64023 minecraft:air 0 replace minecraft:sponge 0
-```
-Both `/forge gen` commands report 9 or 10 new chunks, and the `/fill` reports **No blocks filled**. If
-`Select-String -Path logs\latest.log -Pattern 'while populating chunk \[4000, 4000\]'` prints a line,
-cascading worldgen disturbed this run too and it proves nothing: repeat it on a spare area.
-
-**Spare areas.**
-- 72000: `/forge gen 71968 64 72016 10 -1`, `/forge gen 72000 64 72000 10 0`, then go to
-  `72016 100 72016` and `/fill 72008 32 72008 72023 64 72023 minecraft:air 0 replace minecraft:sponge 0`.
-- 80000: `/forge gen 79968 64 80016 10 -1`, `/forge gen 80000 64 80000 10 0`, then go to
-  `80016 100 80016` and `/fill 80008 32 80008 80023 64 80023 minecraft:air 0 replace minecraft:sponge 0`.
-- 88000: `/forge gen 87968 64 88016 10 -1`, `/forge gen 88000 64 88000 10 0`, then go to
-  `88016 100 88016` and `/fill 88008 32 88008 88023 64 88023 minecraft:air 0 replace minecraft:sponge 0`.
-- 96000: `/forge gen 95968 64 96016 10 -1`, `/forge gen 96000 64 96000 10 0`, then go to
-  `96016 100 96016` and `/fill 96008 32 96008 96023 64 96023 minecraft:air 0 replace minecraft:sponge 0`.
-
-**Regression (same result on both jars).**
-1. Run `/forge setdim @p -1 56016 100 56016` (fixed jar: `64016 100 64016`). Then run the same `/fill` as
-   above in the Nether. N > 0, so the vein still generates where it should.
-2. Delete `config\oreveins\mtmixins_repro.json` when you are done.
-
----
-
-## 4. B13: Lycanites `block` and `material` spawners still loaded or generated chunks
-
-**Files:** `mixin/lycanites/MixinBlockSpawnLocation.java`, `mixin/lycanites/MixinMaterialSpawnLocation.java` (new), `mixins.mtmixins.cascade.json`
-
-**Defect.**
-- `BlockSpawnLocation.getSpawnPositions` calls `world.getBlockState()` on every candidate *before*
-  `isValidBlock`, so the guard on `isValidBlock` never saw an unloaded chunk.
-- `MaterialSpawnLocation` overrides `isValidBlock` without calling `super`.
-- Only `random` locations were covered. The stock `lava`, `fire` and `mineshaft` spawners are `block`
-  locations.
-
-**Fix.** Inside the sweep, `getBlockState` returns air for an unloaded position, and
-`MaterialSpawnLocation.isValidBlock` gets the same guard.
-
-**Setup (both jars).**
-1. In `server.properties` set `view-distance=3` (restore it afterwards). The server then only loads
-   chunks within 3 chunks of a player.
-2. In the server folder run:
-   ```powershell
-   $d = "config\lycanitesmobs\spawners"
-   Set-Content -Encoding Ascii -Path "$d\mtrepro_block.json" -Value '{"name": "mtrepro_block", "type": "spawner", "enabled": true, "enableWithoutMobs": true, "ignoreBiomes": true, "conditions": [], "triggers": [], "locations": [{"type": "block", "rangeMin": [0, 0, 0], "rangeMax": [80, 0, 80], "blocks": [], "listType": "blacklist"}]}'
-   Set-Content -Encoding Ascii -Path "$d\mtrepro_material.json" -Value '{"name": "mtrepro_material", "type": "spawner", "enabled": true, "enableWithoutMobs": true, "ignoreBiomes": true, "conditions": [], "triggers": [], "locations": [{"type": "material", "rangeMin": [0, 0, 0], "rangeMax": [80, 0, 80], "materials": ["air"]}]}'
-   Set-Content -Encoding Ascii -Path "$d\mtrepro_random.json" -Value '{"name": "mtrepro_random", "type": "spawner", "enabled": true, "enableWithoutMobs": true, "ignoreBiomes": true, "conditions": [], "triggers": [], "locations": [{"type": "random", "rangeMin": [0, 0, 0], "rangeMax": [96, 2, 96], "limit": 3000, "easyDifficultyRangeScale": 1, "normalDifficultyRangeScale": 1, "hardDifficultyRangeScale": 1}]}'
-   ```
-   - The spawners have no triggers and no mobs, so they only run when you use `/lm spawner test`.
-   - A `block` or `material` sweep reads every position within 80 blocks horizontally, at your Y level.
-   - The random one tries 3000 random columns within 96 blocks.
-3. Preconditions, otherwise the spawner returns before it sweeps and both jars look fixed:
-   - `/gamerule doMobSpawning` prints true.
-   - In `config\lycanitesmobs\spawning.cfg`, `Disable Spawning` is false.
-   - `config\lycanitesmobs\globalspawner.json`, if present, has `"conditions": []`.
-4. Restart. Type `/lm spawner test mtrepro` and press Tab twice. The first press completes it to
-   `mtrepro_`. The second prints `mtrepro_block, mtrepro_material, mtrepro_random` in chat, in any
-   order. If a name is missing, `logs\latest.log` has `Parsing error loading JSON` or
-   `There was a problem loading JSON` with that file's name.
-
-**Reproduce (baseline jar).**
-1. Run `/gamemode 3` and stay in spectator mode for the rest of this section. Go to the Overworld at
-   least 300 blocks from world spawn (spawn chunks are always loaded), into terrain that already exists,
-   at ground level. Stand still for at least 10 seconds, until chunks stop loading.
-   - In survival or creative, vanilla mob spawning and pathfinding load chunks beyond your view
-     distance. A wandering enderman loads everything within 72 blocks.
-   - With saving off, such a load would still be there at step 6. Vanilla spawns no mobs around a
-     spectator, and mobs near a spectator stop wandering after 5 seconds.
-2. Run `/save-all` and wait 2 seconds. This unloads everything outside your view distance that something
-   else had loaded.
-3. Run `/testforblock ~80 ~ ~ minecraft:stone`. It reports **"Cannot test for block outside of the world"**.
-   That spot is always exactly 5 chunks away and is the last column the sweep reads. If it names a
-   block instead, walk another 300 blocks and repeat from step 2.
-4. Run `/save-off`, wait 30 seconds, then run the step-3 command again.
-   - It must still say "Cannot test for block outside of the world". If it names a block, something
-     other than Lycanites loaded the chunk: run `/save-on`, move 300 blocks and repeat from step 2.
-   - While saving is off the server neither autosaves nor unloads chunks, so whatever the next step
-     loads stays loaded until you check it. Otherwise the 45-second autosave can unload it first.
-   - Do steps 5 and 6 straight away.
-5. Run `/lm spawner test mtrepro_block`. The server may freeze for a few seconds while it loads or
-   generates about 70 chunks.
-6. Run `/testforblock ~80 ~ ~ minecraft:stone` again. It now names the block there (`The block at ...
-   is ...` or `Successfully found the block at ...`): the sweep loaded the chunk, or generated it.
-7. Run `/save-on`.
-8. Move 300 blocks further and repeat steps 2–7 with `/lm spawner test mtrepro_material`. Same result.
-
-**Expected (fixed jar, new spots).** Same steps. Step 6 still says **"Cannot test for block outside of
-the world"** for both spawners, and there is no freeze. If step 6 names a block even though the
-step-4 recheck passed, repeat at one more spot before concluding the fix failed.
-
-**Regression (same result on both jars).**
-1. *Random path.* Move 300 blocks further (still in spectator mode) and do steps 2–4. Then run
-   `/lm spawner test mtrepro_random`, then steps 6–7.
-   - Step 6 still says "outside of the world" on *both* jars.
-   - About 20 of the 3000 columns fall in that chunk, and the `isValidBlock` guard (already present at
-     baseline) keeps them from loading it.
-2. *Loaded positions still found.*
-   - Set `/difficulty normal`. On Peaceful, Lycanites rejects every non-peaceful mob, so only the
-     cephignis could spawn.
-   - Stand at a lava lake or the Nether lava sea, with at least 8 still lava source blocks within 32
-     blocks.
-   - Run `/lm spawner test lava`, up to 5 times. Lycanites lava mobs (cephignis, salamander, ...) spawn
-     in the lava on both jars.
-3. Delete the three `mtrepro_*.json` files and restore `view-distance`.
-
----
-
-## 5. lootattrib: the shared empty loot table's name grew on every lookup
+## 1. lootattrib: the shared empty loot table's name grew on every lookup
 
 **File:** `mixin/vanilla/MixinLootTableManagerName.java`
 
 **Defect.**
 - Every missing loot table resolves to the single `LootTable.EMPTY_LOOT_TABLE`.
-- Once it had been looked up under two names, every later lookup appended about 33 characters to its
-  name.
-- The string grows without bound and each append copies all of it, so tick time climbs steadily.
+- Once it had been looked up under two names, every later lookup copied its whole name and appended
+  about 33 characters.
+- So each lookup of a missing table cost more than the one before, until a restart.
 
-**Fix.** The table is marked shared once and then left alone.
+**Fix.** The table is marked shared once and then left alone. A lookup costs the same however many came
+before it.
 
-Two ForgeEssentials details shape the steps:
-- `/kill` on this server is ForgeEssentials' and only kills players. So the zombies below are given an
-  instant-health effect (which damages undead), and they die on their first tick. Every death looks up
-  the zombie's loot table.
-- The zombies are summoned by command blocks directly, not through `/execute`. ForgeEssentials runs the
-  command inside `/execute` as an NPC named after the entity, refuses `summon` for it, and says
-  nothing.
+**How the test works.**
+- It makes 2,000 lookups of a missing loot table in a single tick and times that tick with spark.
+  - On the baseline, each round of 2,000 takes longer than the one before.
+  - On the fixed jar, a round takes no longer than a control round that has no loot table.
+- The lookups come from containers, not mobs, so nothing drops and nothing piles up. An empty loot
+  table produces no items, and nothing runs every tick except the hoppers.
+- How the 2,000 lookups happen:
+  - A hopper looks into the container above it every tick.
+  - Looking into a dispenser or dropper rolls its loot table first, which is one lookup.
+  - So placing 2,000 dispensers that carry a loot table on top of 2,000 hoppers gives 2,000 lookups
+    in that tick.
+  - Placing droppers over the dispensers, and back, places a fresh set and re-arms the layer with
+    one command each time.
 
-**Reproduce (baseline jar).** Use flat, unclaimed Overworld ground, with section 0.2's command-block
-settings done and `/gamerule doMobLoot` true.
-1. Run `/summon minecraft:zombie ~ ~ ~3 {DeathLootTable:"mtmixins:missing_b",ActiveEffects:[{Id:6b,Amplifier:5b,Duration:1}]}`.
-   - The zombie dies at once.
-   - This names the empty table `mtmixins:missing_b`. In step 3, the first lookup of
-     `mtmixins:missing_a` marks it shared. From then on the baseline appends to the name on every lookup.
-2. Without moving, run
-   `/fill ~3 ~ ~2 ~22 ~ ~2 chain_command_block 5 replace {auto:1b,Command:"summon zombie ~ ~3 ~4 {DeathLootTable:\"mtmixins:missing_a\",NoAI:1b,Silent:1b,ActiveEffects:[{Id:6b,Amplifier:5b,Duration:1}]}"}`.
-   It reports `20 blocks filled`: a row of 20 Chain blocks, idle until triggered, each summoning one
-   zombie.
-3. Without moving, run `/setblock ~2 ~ ~2 repeating_command_block 5 replace {auto:1b}`.
-   - It starts at once and triggers the row every tick: 20 zombies spawn and die every tick, which is
-     20 lookups of a missing table per tick.
-   - The log shows `Couldn't find resource table mtmixins:missing_a` once. That confirms the lookups
-     are happening.
-   - If that line is not there within a few seconds, no zombies are being summoned, and the run shows
-     nothing on either jar.
-4. Run `/spark tps` (or `/forge tps`) right away, then every 2 minutes for 10 minutes.
-   - The tick time (MSPT) is higher at every check and does not level off. Within roughly 3–10 minutes
-     the server falls behind ("Can't keep up!").
-   - The constant cost of 20 zombies a tick is the same on both jars. Only the climb is the bug.
-5. Stop it from the same spot with `/setblock ~2 ~ ~2 minecraft:air`.
-   - MSPT falls back to normal within a few seconds: the cost is paid on each lookup, and the lookups
-     have stopped.
-   - The name never shrinks, though. On the baseline, placing the Repeating block again is slow from
-     its first tick, so restart the server before the next run.
-   - When both runs are done, remove the row from the same spot with
-     `/fill ~2 ~ ~2 ~22 ~ ~2 minecraft:air`.
+**Setup (once, for both jars).** Pick flat, unclaimed ground that already exists, at least 45 × 55
+blocks, with nothing on it you want to keep: the commands replace two layers of blocks there. Stand at
+the north-west corner; the area runs east and south of you.
 
-**Expected (fixed jar).** Same steps: MSPT stays flat for the whole 10 minutes. At the same spot you can
-skip step 2: the row from the first run is still there, and running it again only says
-`No blocks filled`.
+Every command in this section is relative to where you stand, so stay on this spot until both jars are
+done. When you restart the server, log out without moving: you rejoin where you logged out. Run:
+1. `/fill ~3 ~ ~3 ~42 ~ ~52 minecraft:hopper`. It reports `2000 blocks filled`.
+2. `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dropper`. It reports `2000 blocks filled`. The droppers sit on
+   the hoppers; neither has a loot table yet.
 
-**Regression (both jars): real tables are still named.** Section 9's regression shows
+**Reproduce (baseline jar, freshly started server).** Without moving:
+1. Run `/spark tickmonitor --threshold-tick 100` and wait for `Analysis is now complete` (about 6
+   seconds).
+   - From then on it prints `Tick #... lasted N ms` for every tick over 100 ms.
+   - If it prints such lines while you do nothing, run `/spark tickmonitor` again to stop it. Then
+     start it with a higher threshold (200, 300, ...) until it stays quiet.
+2. *Control: the same placement, no loot table.* Run `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser`.
+   Wait 5 seconds, then run `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dropper`. Note what the monitor
+   reports for these two: usually nothing, or one short tick. That is the cost of the placement alone.
+3. *Mark the empty table shared.* Run
+   `/setblock ~-2 ~ ~ minecraft:dispenser 0 replace {LootTable:"mtmixins:missing_b"}`, then
+   `/replaceitem block ~-2 ~ ~ slot.container.0 minecraft:air`.
+   - The log must show `Couldn't find resource table mtmixins:missing_b`.
+   - Without it, the next step's lookups all use one name and the baseline never grows.
+4. Run these two commands alternately, 8 in total, about 5 seconds apart:
+   ```
+   /fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 0 replace {LootTable:"mtmixins:missing_a"}
+   /fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dropper 0 replace {LootTable:"mtmixins:missing_a"}
+   ```
+   Each is one round of 2,000 lookups. The log shows `Couldn't find resource table mtmixins:missing_a`
+   once.
+
+   After the first round, check that the hoppers really rolled the tables: run
+   `/blockdata ~42 ~1 ~52 {}`. It changes nothing and replies `The data tag did not change: {...}` with
+   that container's data. The text must not contain `LootTable`. If it does, hoppers on this server do
+   not look into containers every tick, so no lookups happened and the test shows nothing on either
+   jar.
+5. The monitor reports every round, and the rounds get longer as you go.
+   - For scale: the baseline's 2,000 lookups alone took 0.1 s in the first round, rising to 0.6 s
+     in the eighth, on Java 8 with Aikar's flags. That was measured by replaying the exact string
+     building from both revisions.
+   - Garbage collection makes single rounds jump around. The trend and the gap to the control are
+     what matter.
+   - Tick times go back to normal after the last round, because the cost is paid per lookup.
+6. Run `/spark tickmonitor` (it stops the monitor) and `/setblock ~-2 ~ ~ minecraft:air`. Leave the
+   hoppers and droppers for the other jar. Restart the server before running the other jar, because
+   the name lives until a restart.
+
+**Expected (fixed jar, freshly started server).** Same steps. The rounds in step 4 take no longer than
+the control in step 2, and they do not grow. The 2,000 lookups themselves cost under a millisecond.
+
+**Clean up (after both jars).** From the same spot, run `/fill ~3 ~ ~3 ~42 ~1 ~52 minecraft:air`.
+
+**Regression (both jars): real tables are still named.** Section 5's regression shows
 `table minecraft:chests/simple_dungeon`.
 
 ---
 
-## 6. B20: the "% of capacity" in the loot-fill log used the wrong container
+## 2. B20: the "% of capacity" in the loot-fill log used the wrong container
 
 **File:** `mixin/vanilla/MixinLootTableShuffle.java`
 
@@ -572,7 +214,7 @@ Only Y differs.
 
 ---
 
-## 7. The `@Mod` version said 0.1.0 in the 0.2.0 build
+## 3. The `@Mod` version said 0.1.0 in the 0.2.0 build
 
 **File:** `MedievalTimesMixins.java`
 
@@ -597,7 +239,7 @@ jar. The list column shows 0.2.0 on both.
 
 ---
 
-## 8. DragonBridge's fail-closed message said "inside claims"
+## 4. DragonBridge's fail-closed message said "inside claims"
 
 **File:** `bridge/DragonBridge.java`
 
@@ -655,7 +297,7 @@ Also check `Dragon Griefing` in `config\ice_and_fire.cfg` (category `all`). In t
 
 ---
 
-## 9. Annotation processor warning on `MixinLootTableAttribution`
+## 5. Annotation processor warning on `MixinLootTableAttribution`
 
 **File:** `mixin/vanilla/MixinLootTableAttribution.java`
 
@@ -687,7 +329,7 @@ too.
 
 ---
 
-## 10. Offline check (no server)
+## 6. Offline check (no server)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\mixin-harness\run.ps1
@@ -713,4 +355,5 @@ powershell -ExecutionPolicy Bypass -File tools\mixin-harness\run.ps1
   `RESULT: every bug reproduces on the baseline, is fixed on the working tree, and nothing regressed.`
 - The exit code is 0 only in that case.
 
-Fixes 7–9 are not covered; sections 7–9 test them directly.
+The version, DragonBridge and annotation-processor fixes are not covered; sections 3–5 test them
+directly. The harness still contains the B18, B15, B2b and B13 checks.
