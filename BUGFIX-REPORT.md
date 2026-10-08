@@ -1,284 +1,372 @@
 # Bug fix report
 
-Baseline: `96cc13c` ("Dragon claim protection and breath damage policy"). Fixes are on branch
-`claude/tender-edison-ygomlf`.
+B18, B15, B2b and B13 are confirmed fixed in game and are no longer listed. The fixes below were merged
+in PR #1 (baseline `96cc13c`), except the annotation-processor fix (section 5). That fix,
+`tools\build-jars.ps1` and the PowerShell harness are on branch `claude/tender-edison-ygomlf`. Check
+that branch out before 0.1.
 
-**Before** means a jar built from `96cc13c`. **After** means a jar built from this branch
-(`./gradlew build`, deploy `build/libs/mtmixins-0.2.0.jar`).
+Each section has numbered in-game steps. **Reproduce** runs them on the baseline jar (the bug shows).
+**Expected** runs them on the fixed jar (the bug is gone). **Regression** gives the same result on both
+jars. Section 6 runs the same before/after check offline.
 
-**Harness.** `tools/mixin-harness/run.sh [baseline-rev]` builds the mixins from the baseline and from
-the working tree, applies each build with the real Mixin 0.8.7 transformer and MixinExtras 0.5.5 to
-stand-in classes that have the same method shapes as the real targets, and runs one test per fix. It
-needs JDK 9+ and Maven Central on the first run, and takes about 20 s. A bug shows as `FAIL` on the
-baseline and `PASS` on the working tree. Every regression case must `PASS` on both.
+## 0. Setup
 
----
+### 0.1 Get the branch and build both jars (PowerShell, repo root)
 
-## 1. B18: collision counter never clears for minecarts, so they become unpushable
+```powershell
+git fetch origin
+git switch claude/tender-edison-ygomlf
+git merge --ff-only origin/claude/tender-edison-ygomlf
+powershell -ExecutionPolicy Bypass -File tools\build-jars.ps1
+```
 
-**Files:** `mixin/vanilla/MixinEntityCollisionCount.java`, `mixin/vanilla/MixinEntityLivingBaseCollisions.java` (javadoc only)
+This writes `..\mtmixins-BASELINE.jar` (sources at `96cc13c`) and `..\mtmixins-FIXED.jar` (current
+sources). Gradle 9 needs Java 17+. If the build says otherwise, add `-Jdk "<JDK 17+ folder>"`. The
+script:
+- refuses to run if `src` has uncommitted changes;
+- restores `src` even when a build fails;
+- fails unless the baseline jar lacks `MixinMaterialSpawnLocation.class` and the fixed jar has it, so
+  it cannot hand you the same build twice.
 
-**Defect.** The per-tick push count was reset by an `@Inject` at HEAD of `Entity.onUpdate`. Two cases
-never reach that point:
+It uses `gradlew.bat`, or `gradle` from the PATH. If you have neither and only build from IntelliJ, do it
+by hand:
+1. `git status --short src` must print nothing.
+2. `git restore --source 96cc13c --worktree -- src`
+3. IntelliJ Gradle tool window → MedievalTimesMixins → Tasks → build: run `clean`, then `build`.
+4. `Copy-Item build\libs\mtmixins-0.2.0.jar ..\mtmixins-BASELINE.jar`
+5. `git restore --worktree -- src`
+6. Run `clean`, then `build` again. Then `Copy-Item build\libs\mtmixins-0.2.0.jar ..\mtmixins-FIXED.jar`
+7. `git status --short src` must print nothing. Then
+   `tar -tf ..\mtmixins-BASELINE.jar | Select-String MixinMaterialSpawnLocation` must print nothing,
+   and the same command on `..\mtmixins-FIXED.jar` must print one line.
 
-- `EntityMinecart.onUpdate` never calls `super.onUpdate()`.
-- Entities outside the area the world ticks are never updated at all.
+### 0.2 Test server
 
-`MixinEntityLivingBaseCollisions` refuses a push when *either* side is at the cap, so once such an
-entity reaches 8 pushes it can never be pushed by a living entity again until its chunk reloads. A
-stationary minecart only collides with other minecarts in its own tick, so walking into it does
-nothing.
-
-There is a second effect: a ticking entity's count was wiped at its own update, which discarded the
-pushes it received earlier in the same tick. One entity could take part in up to 2× the cap per tick.
-
-**Upstream.** Paper 1.12.2, `Spigot-Server-Patches/0199-Cap-Entity-Collisions.patch`, gates only the
-pusher. At the start of the pusher's own pass it sets
-`numCollisions = Math.max(0, numCollisions - max)` and never reads the pushed entity's count, so it has
-no reset to miss. The javadoc said the symmetric gate and the `onUpdate` reset were Spigot's. That was
-wrong, and the javadoc is now corrected. The symmetric gate is kept as a deliberate local choice.
-
-**Fix.** The count is stored together with `world.getTotalWorldTime()` and reads as 0 in any other
-tick. The `onUpdate` inject is removed.
-
-**Reproduce (before).**
-1. Run a server or singleplayer world with the baseline jar. Make sure there is no
-   `config/mtmixins-collisions.properties`, so the cap is the default 8.
-2. On flat ground with no rails, run `/summon minecraft:minecart ~3 ~ ~`.
-3. Walk into the cart. It slides for the first few contacts (8 ticks of contact, under half a second),
-   then stops reacting to players and mobs. It stays stuck until the chunk unloads and reloads, after
-   which it slides for 8 more ticks of contact.
-4. Harness: `CollisionTest` prints `minecart pushed 8 times (expected 20)` → `FAIL`, and
-   `pushes per tick ... max 297` (above the 40×8/2 = 160 bound) → `FAIL`.
-
-**Verify (after).**
-1. Repeat steps 1–3. The cart slides on every contact, indefinitely.
-2. Harness: `CollisionTest` shows `minecart: PASS` (20/20) and `pen: PASS` (156 pushes per tick for
-   40 cows, ≤ 160; no entity above 8).
-3. Regression:
-   - `max-entity-collisions = 0` in `config/mtmixins-collisions.properties`: mobs do not push each
-     other.
-   - `max-entity-collisions = -1`: vanilla pushing.
-   - Cramming: run `/gamerule maxEntityCramming 24` and put 30 cows in a 1×1 pit. They still take
-     cramming damage (that code runs before the wrapped call and is untouched).
-   - With the pit loaded, `/spark profiler --timeout 60` on baseline and on the branch: time under
-     `EntityLivingBase.collideWithNearbyEntities` is the same or lower on the branch, and far higher
-     with `-1`.
+- **Server and jars.** Use a copy of the server folder, not production. To switch builds: stop the
+  server, delete every `mtmixins*.jar` from `mods\`, copy in exactly one of the two jars, start.
+- **Permissions and config.**
+  - You need to be an op (the dedicated-server default level, 4, covers every command here).
+  - `config\mixinbooter.cfg` must not blacklist any `mixins.mtmixins.*.json`.
+- **Creating files.** Use Notepad (UTF-8), or the `Set-Content -Encoding Ascii` commands given. Never
+  use `>` or `Out-File` in Windows PowerShell 5.1. They write UTF-16, which these mods cannot read, and
+  some of them fail silently.
+- **Commands.** Type every command in chat. `/gamemode` on this server is ForgeEssentials'. It accepts
+  the numbers 0, 1 and 3.
+- **Relative coordinates.** Some steps use `~` positions in several commands in a row. Do not move
+  between those commands.
+- **Command blocks (section 2).** Set `enable-command-block=true` in `server.properties` before
+  starting. In game, run `/gamerule commandBlockOutput false` and `/gamerule logAdminCommands false`.
+  Without these, every command a block runs is echoed to chat and to the log. The blocks are placed with
+  `/setblock`, so you need no GUI and no creative mode.
 
 ---
 
-## 2. B15: unload race skipped duplicate resolution for the rest of the slice
-
-**File:** `mixin/vanilla/MixinWorldServerEntityDupe.java`
-
-**Defect.** When the world's copy of a UUID was queued for unload, the loop hit `continue` before it
-consulted `seenInBatch`. Every copy of that UUID in the same entity slice then went to vanilla.
-Vanilla swapped in the first copy and refused the rest with
-`Keeping entity <id> that already exists with UUID <uuid>`. The refused copies stay in the chunk's
-entity list and are saved again, which is the permanent duplicate B15 exists to remove.
-
-**Upstream.** Paper 1.12.2, `Spigot-Server-Patches/0338-Duplicate-UUID-Resolve-Option.patch`:
-`if (other == null || other.dead || world.getEntityUnloadQueue().contains(other)) other = thisChunk.get(entity.uniqueID);`
-
-**Fix.** Same ordering as Paper. A world copy that is queued for unload is treated as absent, then the
-batch map is checked. The unload-race log line moved into `mtmixins$noteUnloadRace` with unchanged
-text and rate. It now counts a race only when no earlier copy in the batch claims the UUID.
-
-**Reproduce (before).**
-1. This cannot be triggered on demand in game. It needs a chunk to unload and reload in the same tick
-   while it holds ≥ 2 copies of one UUID in one 16-block slice and another copy of that UUID is queued
-   for unload.
-2. Live signature: a `Chunk unload race, not a duplicate` line for a UUID, followed by vanilla's
-   `Keeping entity ... that already exists with UUID <same uuid>`. The UUID is still in that chunk
-   twice on the next load (check with `/tellme` or NBTExplorer).
-3. Harness: `DupeTest` prints `unload race + 2 copies in slice: FAIL - chunk list now 2 entities ... Keeping entity`.
-
-**Verify (after).**
-1. Harness: `DupeTest` prints `unload race + 2 copies in slice: PASS - chunk list now 1 entities`. The
-   only vanilla warning is `Tried to add entity ... but it was marked as removed already` for the
-   dropped copy, the same line every B15 drop already produces.
-2. Regression, all `PASS` on baseline and branch:
-   - Plain unload race: vanilla swap, nothing dropped, no warnings.
-   - Live nearby duplicate: dropped and pruned from the chunk.
-   - Live distant duplicate: re-identified, both kept.
-   - Three copies in one slice with no race: two dropped.
-3. On the server, `Duplicate UUID resolved` and `Chunk unload race` lines keep their existing format.
-   The `unload races skipped` total no longer counts the extra copies.
-
----
-
-## 3. B2b: OreVeins biome cache returned another world's biome
-
-**Files:** `util/ChunkBiomeCache.java`, `mixin/oreveins/MixinWorldGenVeins.java`
-
-**Defect.** `WorldGenVeins` is a single `IWorldGenerator` shared by every dimension, and on an
-integrated server it lives for the whole JVM. The cache key was chunk coordinates only. A column in
-world B was therefore answered with world A's biome whenever that cache slot last held the same chunk
-coordinates from A. `matchesBiome` then accepted or rejected veins against the wrong biome. Affected
-cases:
-
-- A vein enabled in several dimensions.
-- Any two dimensions generating the same coordinates.
-- In singleplayer, every save opened after the first in one session.
-
-**Fix.** Each entry is stamped with a per-world generation object that holds the `World` weakly, so it
-never keeps a world alive. A lookup from a different world is a miss. The lock-free immutable-entry
-design is unchanged.
-
-**Reproduce (before).**
-1. In game the result depends on generation order and is not deterministic. Concrete form: give a
-   vein `"dimensions": [0, -1]`, `"biomes": ["hell"]`, ore `minecraft:gold_block`, and stone
-   `minecraft:stone` plus `minecraft:netherrack`. Generate the same coordinates in the Nether and the
-   Overworld alternately (two players at the same X/Z, or a pregenerator running both dimensions at
-   once). Gold blocks appear in Overworld stone, which is impossible because the Overworld has no
-   `hell` biome. Some Nether chunks also miss veins they should have.
-2. Harness: `OreVeinsTest` prints `matchesBiome saw 0 x hell, 256 x forest (expected 256 x hell)` →
-   `cross-world: FAIL`.
-
-**Verify (after).**
-1. Harness: `cross-world: PASS` (256 × hell). `same-world cache: PASS`: back in the first world, one
-   pass of 256 `getBiome` calls, then a repeat pass with 0 calls, all answers correct. The cache still
-   works.
-2. Regression for single-world output: in a fresh JVM each time, create a world from a fixed seed and
-   pregenerate the same area with the baseline jar and with the branch jar. Ore counts in the area
-   (TellMe `blockstats`, or MCA Selector) are identical. Single-world lookups return what they did
-   before.
-
----
-
-## 4. B13: Lycanites `block` and `material` spawners still generated chunks
-
-**Files:** `mixin/lycanites/MixinBlockSpawnLocation.java`, `mixin/lycanites/MixinMaterialSpawnLocation.java` (new), `mixins.mtmixins.cascade.json`
-
-**Defect.** The guard at HEAD of `BlockSpawnLocation.isValidBlock` only covered `RandomSpawnLocation`,
-which calls `super.isValidBlock` on bare columns. Two other paths were missed:
-
-- `BlockSpawnLocation.getSpawnPositions` calls `world.getBlockState(pos)` on every candidate to skip
-  flowing liquids, *before* `isValidBlock`. That read loads or generates the chunk, so the guard never
-  fired on this path. This is true of every Lycanites 1.12.2 version from 2019-06-11 ("Block Spawn
-  Location Fix") through community 2.0.8.10 (GitLab `Lycanite/LycanitesMobs`, branch
-  `Minecraft-1.12.2`).
-- `MaterialSpawnLocation` overrides `isValidBlock` without calling `super` and opens with its own
-  `getBlockState`.
-
-The stock `lava`, `fire` and `mineshaft` spawners are `"type": "block"` with a 65×65×65 sweep around
-the player.
-
-**Fix.** A `@WrapOperation` on `World.getBlockState` inside `getSpawnPositions` returns air for an
-unloaded position, and `isValidBlock` then rejects it. `MaterialSpawnLocation.isValidBlock` gets the
-same HEAD guard.
-
-**Reproduce (before).**
-1. On a server with the baseline jar and Lycanites, start `/spark profiler --thread "Server thread"`.
-2. Repeatedly teleport into ungenerated terrain next to lava (for example `/tp @p 20000 80 20000`, then
-   a new location each time), so spawner sweeps run before the surrounding chunks have loaded.
-3. Stop the profiler. Stacks
-   `BlockSpawnLocation.getSpawnPositions → World.getBlockState → ChunkProviderServer.provideChunk`
-   (load or generate) are present.
-4. Harness: `LycanitesTest` prints `BlockSpawnLocation sweep: FAIL` and
-   `MaterialSpawnLocation sweep: FAIL`, both with chunks `[-1,-1 … 1,1]` loaded by the scan.
-   `RandomSpawnLocation: PASS`.
-
-**Verify (after).**
-1. Same profile: no `provideChunk` under `getSpawnPositions` or `MaterialSpawnLocation.isValidBlock`.
-2. Harness: all three `PASS`. The sweeps load 0 chunks and return 768 positions, exactly the candidates
-   inside the loaded chunk. `RandomSpawnLocation` returns the same 4 positions as on the baseline.
-3. Regression: in loaded terrain, lava, fire and mineshaft spawns occur at the same rate as on the
-   baseline (watch a known spot for 10 minutes on each build).
-
----
-
-## 5. lootattrib: shared loot table's name grew on every lookup
+## 1. lootattrib: the shared empty loot table's name grew on every lookup
 
 **File:** `mixin/vanilla/MixinLootTableManagerName.java`
 
-**Defect.** Every missing table resolves to the single shared `LootTable.EMPTY_LOOT_TABLE`. After it
-had been asked for under two names, its name no longer matched any name, so every later lookup
-appended `"<shared: " + name + " and " + location + ">"`. This runs on every mob death and every loot
-chest. The string grows without bound and each append copies all of it. The cost is quadratic CPU and
-heap growth on the server thread for as long as `mixins.mtmixins.lootattrib.json` is loaded.
+**Defect.**
+- Every missing loot table resolves to the single `LootTable.EMPTY_LOOT_TABLE`.
+- Once it had been looked up under two names, every later lookup copied its whole name and appended
+  about 33 characters.
+- So each lookup of a missing table cost more than the one before, until a restart.
 
-**Fix.** The table is marked shared once (`<shared: a, b and possibly others>`) and then left alone.
+**Fix.** The table is marked shared once and then left alone. A lookup costs the same however many came
+before it.
 
-**Reproduce (before).**
-1. Run `/summon minecraft:zombie ~ ~ ~ {DeathLootTable:"mtmixins:missing_a"}`, then
-   `/kill @e[type=zombie]`.
-2. Repeat step 1 with `mtmixins:missing_b`.
-3. Set up a repeating command block running
-   `/summon minecraft:zombie ~ ~2 ~ {DeathLootTable:"mtmixins:missing_a",NoAI:1b}`, chained to
-   `/kill @e[type=zombie]`. Leave it for 20 minutes.
-4. `/spark profiler --timeout 60` shows `MixinLootTableManagerName` / `getLootTableFromLocation` →
-   `StringBuilder` / `Arrays.copyOf` growing, and MSPT rises steadily.
-5. Harness: `LootNameTest` reports a name of `559985 chars` after 20,000 lookups, taking about 7 s →
-   `FAIL`.
+**How the test works.**
+- It rolls 2,000 loot tables in a single tick and times that tick with spark.
+  - A *round* rolls the missing table `mtmixins:missing_a`.
+  - A *control* rolls vanilla's real, empty table `minecraft:empty`. That is the same work per
+    container but a different table, which nothing ever renames.
+  - On the baseline the rounds climb far above the controls. On the fixed jar they stay level with
+    them.
+- No mobs and no items are involved. An empty table produces nothing, and the only thing that runs
+  every tick is a field of idle hoppers.
+- How a tick rolls 2,000 tables:
+  - A hopper looks into the container above it every tick.
+  - Looking into a dispenser rolls its loot table first.
+  - So a layer of 2,000 dispensers on 2,000 hoppers rolls 2,000 tables in the tick the layer gets them.
+  - Each `/fill` re-arms the layer by flipping the dispensers between facing down (`0`) and facing up
+    (`1`). Lootr's default config never converts dispensers, so it stays out of the way.
 
-**Verify (after).**
-1. Same steps: MSPT stays flat and nothing from this mixin shows in the profile.
-2. Harness: 58 chars, about 5 ms → `PASS`. A real table is still stamped with its own name
-   (`real table still named: mod:chest`).
+**Setup (once, for both jars).** Pick flat, unclaimed ground that already exists, at least 45 × 55
+blocks, with nothing on it you want to keep: the commands replace blocks there. Stand at the north-west
+corner; the area runs east and south of you.
+
+Every command in this section is relative to where you stand, so stay on this spot until both jars are
+done. When you restart the server, log out without moving: you rejoin where you logged out. Run:
+1. `/fill ~3 ~ ~3 ~42 ~ ~52 minecraft:hopper`. It reports `2000 blocks filled`.
+2. `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 0`. It reports `2000 blocks filled`. The dispensers
+   sit on the hoppers, facing down, with no loot table yet.
+
+**Reproduce (baseline jar, freshly started server).** Without moving:
+1. Run `/save-off`. It replies `Turned off world auto-saving`. Otherwise spark reports the 45-second
+   autosave as if it were a round. Stopping the server still saves everything.
+2. Run `/spark tickmonitor --threshold-tick 100 --without-gc`. Wait for `Analysis is now complete`
+   (about 6 seconds), then watch for 60 seconds.
+   - From then on it prints `Tick #... lasted N ms` for every tick over 100 ms. Spark counts from one
+     tick's start to the next, so an idle tick reads about 50 ms.
+   - If `lasted` lines appear while you do nothing, run `/spark tickmonitor` to stop it and start it
+     again with `--threshold-tick 150`. Do not go higher, or the first baseline rounds will not show.
+3. *Opening control.* Run `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 1 replace {LootTable:"minecraft:empty"}`.
+   Wait 5 seconds, then run `/fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 0 replace {LootTable:"minecraft:empty"}`.
+   - The line that belongs to a `/fill` is the one printed right after its `2000 blocks filled`. For a
+     control it is usually no line at all, or a short one.
+   - The log must never show `Couldn't find resource table minecraft:empty`.
+4. *Mark the empty table shared.* Run
+   `/setblock ~ ~ ~2 minecraft:dispenser 0 replace {LootTable:"mtmixins:missing_b"}`, then
+   `/replaceitem block ~ ~ ~2 slot.container.0 minecraft:air`.
+   - The log must show `Couldn't find resource table mtmixins:missing_b`.
+   - Without it, the rounds below all use one name and the baseline never grows.
+5. *Rounds.* Run these two commands alternately, 6 in total, about 5 seconds apart:
+   ```
+   /fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 1 replace {LootTable:"mtmixins:missing_a"}
+   /fill ~3 ~1 ~3 ~42 ~1 ~52 minecraft:dispenser 0 replace {LootTable:"mtmixins:missing_a"}
+   ```
+   - The log shows `Couldn't find resource table mtmixins:missing_a` once.
+   - If a `/fill` says `No blocks filled`, you ran the same facing twice in a row. Run the other one.
+   - After the first round, run `/blockdata ~42 ~1 ~52 {}`. It changes nothing and replies
+     `The data tag did not change: {...}` with that dispenser's data, which should not contain
+     `LootTable`. If it does, the hoppers are not looking into the dispensers every tick. The test
+     still works one round late, because each `/fill` rolls the previous round's tables as it empties
+     the dispensers. Run one extra round and read the trend from round 2.
+6. *Closing control.* Run the two commands of step 3 again.
+7. Run `/spark tickmonitor` (it stops the monitor), `/setblock ~ ~ ~2 minecraft:air` and `/save-on`.
+   Restart the server before running the other jar. The name lives until a restart.
+
+**What the baseline shows.**
+- The rounds' lines are far above the opening control, and they trend upward. A single round can come
+  out shorter than the one before it.
+- For scale, the baseline's own bytecode replayed on Java 8 with Aikar's flags:
+
+  | Round | 1 | 2 | 3 | 4 | 5 | 6 |
+  |---|---|---|---|---|---|---|
+  | Extra time per round | 0.11 s | 0.32 s | 0.37 s | 0.57 s | 0.71 s | 0.86 s |
+
+  Your machine will differ; judge the trend and the gap to the controls.
+- The closing control drops back to the opening control's level: only missing-table lookups got slower.
+- Tick times between rounds stay normal, because the cost is paid per lookup.
+
+**Expected (fixed jar, freshly started server).** Same steps. All six rounds are about the same as the
+controls, with no upward trend. On most machines the monitor prints nothing for any of them. Round 1
+can be the slowest: that is the JIT warming up.
+
+**Clean up (after both jars).** From the same spot, run `/fill ~3 ~ ~3 ~42 ~1 ~52 minecraft:air`.
+
+**Regression (both jars): real tables are still named.** Section 5's regression shows
+`table minecraft:chests/simple_dungeon`.
 
 ---
 
-## 6. B20: "% of capacity" in the loot-fill log was computed against the wrong container
+## 2. B20: the "% of capacity" in the loot-fill log used the wrong container
 
 **File:** `mixin/vanilla/MixinLootTableShuffle.java`
 
-**Defect.** The occupancy log divided the running average of slots used by the slot count of
-whichever container happened to be the 1st, 100th, 200th, ... fill. With mixed container sizes the
-figure is meaningless; it can exceed 100%. This is the number used to check the 40–65% target. The
-`wouldHaveOverfilled` counter was incremented but never printed.
+**Defect.** Every 100th fill, the log line `Loot fill: ... Average occupancy over N fills: X slots,
+Y% of capacity` divided the running average by **that one container's** slot count. With mixed
+container sizes Y is meaningless and can exceed 100%.
 
-**Fix.** Capacity is summed alongside usage, giving total slots used ÷ total slots offered. The counter
-is printed as `N fills used every slot`.
+**Fix.** Slots used ÷ slots offered, both summed over all fills. The line also prints the "every slot
+used" counter, which used to be collected but never shown.
 
-**Reproduce (before).**
-1. Harness: `LootStatsTest` fills a 27-slot container 99 times and a 12-slot container once. Ground
-   truth is 1422 of 2685 slots = 53%. The baseline logs `... 14.2 slots, 119% of capacity` at fill 100.
-2. On the server, any `Loot fill:` line above 100% is this bug.
+**Reproduce (baseline jar).**
+1. Start the server and join. The fill counter starts at 0 at every start. Stay in terrain that
+   already exists, and do not open or break any loot container.
+2. Go to a flat spot with section 0.2's command-block settings done. Without moving, run these in
+   order. They place the chest and the hopper, then the three Chain blocks (idle until triggered), then
+   the Repeating block, which starts at once.
+   ```
+   /setblock ~1 ~ ~4 minecraft:chest
+   /setblock ~3 ~ ~4 minecraft:hopper
+   /setblock ~2 ~ ~2 chain_command_block 5 replace {auto:1b,Command:"replaceitem block ~-1 ~ ~2 slot.container.0 minecraft:air"}
+   /setblock ~3 ~ ~2 chain_command_block 5 replace {auto:1b,Command:"blockdata ~ ~ ~2 {LootTable:\"minecraft:chests/jungle_temple_dispenser\"}"}
+   /setblock ~4 ~ ~2 chain_command_block 5 replace {auto:1b,Command:"replaceitem block ~-1 ~ ~2 slot.container.0 minecraft:air"}
+   /setblock ~1 ~ ~2 repeating_command_block 5 replace {auto:1b,Command:"blockdata ~ ~ ~2 {LootTable:\"minecraft:chests/simple_dungeon\"}"}
+   ```
+   Each tick this does four things, in order:
+   - `/blockdata` empties the 27-slot chest and gives it a loot table.
+   - `/replaceitem` makes the chest fill.
+   - The same two commands empty and fill the 5-slot hopper.
 
-**Verify (after).**
-1. Harness: the branch logs `... 14.2 slots, 53% of capacity; 0 fills used every slot`, which matches
-   the ground truth.
-2. Regression: both runs produce the identical 1422/2685 placement, so loot behaviour is unchanged.
-   Only the log line differs.
+   Fills alternate, so every even-numbered fill is the hopper.
+3. In the server folder, wait until `Select-String -Path logs\latest.log -Pattern 'over 200 fills'` prints a line (about 5
+   seconds at 20 TPS, longer if the server lags). Then stop it from the same spot with
+   `/setblock ~1 ~ ~2 minecraft:air`.
+4. In the server folder, run `Select-String -Path logs\latest.log -Pattern 'over 100 fills'`. It reads
+   `Loot fill: N stacks into 5 slots (target was T). Average occupancy over 100 fills: X slots, Y% of capacity. Register B20.`
+   - X is about 8, and **Y = 20 × X** (about 160%) give or take 2.
+   - That is the running average divided by this one hopper's 5 slots. Above 100% is impossible.
+
+**Expected (fixed jar).** Same steps, on a fresh flat spot. Or, standing on the old spot, first clear
+the old blocks with `/fill ~1 ~ ~2 ~4 ~ ~4 minecraft:air`; otherwise each `/setblock` says `The block
+couldn't be placed`. The line reads:
+`... into 5 slots ... over 100 fills: X slots, Y% of capacity; 0 fills used every slot. Register B20.`
+- **Y = 6.25 × X** (about 50%) give or take 1.
+- That is 100 fills × X slots used ÷ 1600 slots offered (50 chests × 27 + 50 hoppers × 5).
+
+**If the line says `into 27 slots`.** An odd number of other loot fills came before your contraption,
+so every hundredth fill is the chest. Restart and repeat. If it happens again, fix the order from the
+same spot:
+1. Stop the Repeating block as in step 3.
+2. Run one hopper fill by hand: `/blockdata ~3 ~ ~4 {LootTable:"minecraft:chests/jungle_temple_dispenser"}`,
+   then `/replaceitem block ~3 ~ ~4 slot.container.0 minecraft:air`.
+3. Re-run the Repeating block's `/setblock` line.
+4. Read the next `over N00 fills` line that says `into 5 slots`.
+   - Baseline: Y = 20 × X (±2), over 100%.
+   - Fixed: about 50%.
+
+**If the line says `into 5 slots` but the fixed jar's Y is more than 1 away from 6.25 × X.** An even
+number of other fills came first. The hopper is still every even-numbered fill; only the total slots
+offered changed. Do not do the hand fill, because it would move every `N00` line onto the chest. The
+fixed jar passes if Y is about 50% and under 100%. The baseline is not affected (Y = 20 × X).
+
+**Regression.** Both jars run the same merge and split code, so X is about 8 on both (it varies by
+about ±0.3 between runs). The `N stacks` of a single fill is random and will not match between runs.
+Only Y differs.
 
 ---
 
-## 7. `@Mod` version said 0.1.0 in a 0.2.0 build
+## 3. The `@Mod` version said 0.1.0 in the 0.2.0 build
 
 **File:** `MedievalTimesMixins.java`
 
-**Defect.** `VERSION = "0.1.0"`, while `gradle.properties` has `mod_version = 0.2.0` (the bump was in
-`98d3f37`). FML takes the version from the `@Mod` annotation, not from `mcmod.info`. The client Mods
-list, the FML handshake and crash-report mod tables therefore report 0.1.0 for the 0.2.0 jar.
+The jar name and `mcmod.info` say 0.2.0 on both jars. Only the `@Mod` version FML tracks was wrong.
 
-**Fix.** `VERSION = "0.2.0"`, with a comment that it must track `mod_version`.
+**Reproduce.** Use one test world.
+1. Start the server with the fixed jar, then stop it.
+2. Switch to the baseline jar and start. `logs\latest.log` shows
+   `[FML.ModTracker]: This world was saved with mod mtmixins version 0.2.0 and it is now at version 0.1.0, things may not work well`.
 
-**Reproduce (before).** Build the baseline. The jar is named `mtmixins-0.2.0.jar`, but the client
-Mods screen shows `Medieval Times Mixins 0.1.0`. The mod state table in any crash report or
-`fml-*-latest.log` lists `mtmixins{0.1.0}` next to `mtmixins-0.2.0.jar`.
+**Expected.**
+3. Switch back to the fixed jar and start. The log shows
+   `... saved with mod mtmixins version 0.1.0 and it is now at version 0.2.0 ...`. That is your log's
+   line 2247.
 
-**Verify (after).** The same places show 0.2.0. `acceptableRemoteVersions = "*"`, so mixed
-client/server versions still connect.
+Client view: on a client, delete every `mtmixins*.jar` from the client's own `mods` folder and copy in
+the same jar the server is running (switch it each time you switch the server). Under Mods → Medieval Times Mixins, the
+detail pane reads `Version: 0.2.0 (0.1.0)` on the baseline and `Version: 0.2.0 (0.2.0)` on the fixed
+jar. The list column shows 0.2.0 on both.
+
+**Regression.** `acceptableRemoteVersions = "*"`, so a client on either jar joins a server on either jar.
 
 ---
 
-## 8. DragonBridge fail-closed messages said "inside claims"
+## 4. DragonBridge's fail-closed message said "inside claims"
 
 **File:** `bridge/DragonBridge.java`
 
-**Defect.** When Civilizations is present but `DragonPolicy` lacks the expected methods, or
-`blockChangeAllowed` throws, `blockChangeAllowed` returns `false` for every block in every location,
-since there is no policy to tell claimed land from unclaimed. The two log messages said dragon block
-changes would be refused "inside claims". An operator reading the log would not expect dragons to stop
-breaking blocks on unclaimed land too.
+**Defect.** When `DragonPolicy` exists but its methods do not resolve, dragons are refused every block
+change everywhere. The message said "inside claims", which understates it. Behaviour does not change;
+only the message does.
 
-**Fix.** Both messages now say every block change is refused, claimed or not. Behaviour is unchanged.
+**Setup (test server only).** Use one of these:
+- **a)** Build Civilizations with `DragonPolicy.blockChangeAllowed` renamed (for example to
+  `blockChangeAllowedX`) and deploy it.
+- **b)** Replace Civilizations with an empty `DragonPolicy` class:
+  - Move the Civilizations jar out of `mods\`.
+  - In the server folder, run this, with `$jdk` set to your JDK 17 folder:
+  ```powershell
+  $jdk = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
+  $t = Join-Path $env:TEMP "dragonpolicy-stub"
+  New-Item -ItemType Directory -Force "$t\src\me\qourtenay\Civilizations\compat" | Out-Null
+  Set-Content -Encoding Ascii -Path "$t\src\me\qourtenay\Civilizations\compat\DragonPolicy.java" -Value 'package me.qourtenay.Civilizations.compat; public final class DragonPolicy { }'
+  & "$jdk\bin\javac.exe" --release 8 -d "$t\out" "$t\src\me\qourtenay\Civilizations\compat\DragonPolicy.java"
+  & "$jdk\bin\jar.exe" cf mods\DragonPolicyStub.jar -C "$t\out" .
+  ```
+  - FML logs `FML has found a non-mod file DragonPolicyStub.jar ... injected into your classpath`.
+  - Skip b) if another mod in the pack requires Civilizations.
 
-**Reproduce (before).** Run with a Civilizations build whose `me.qourtenay.Civilizations.compat.DragonPolicy`
-lacks `blockChangeAllowed(Object, Object, Object)` (or temporarily rename it). The log says
-"...REFUSE all dragon block changes inside claims...". A dragon breathing on unclaimed land breaks
-nothing.
+Also check `Dragon Griefing` in `config\ice_and_fire.cfg` (category `all`). In the server folder,
+`Select-String -Path config\ice_and_fire.cfg -Pattern 'Dragon Griefing'` prints
+`I:"Dragon Griefing"=N`. N must be 0 or 1. With 2, dragons never change blocks on any jar.
 
-**Verify (after).** Same setup. The log says dragons will be refused every block change everywhere.
-Dragons on unclaimed land still break nothing, exactly as before.
+**Reproduce (baseline jar).**
+1. Start the server. Nothing from DragonBridge is logged yet. It logs on the first dragon breath that
+   reaches the mixin, which happens outside a claim.
+2. On unclaimed land, in daytime, on Easy or harder, run these. Survival matters: untamed dragons
+   ignore creative and spectator players.
+   - `/gamemode 0`
+   - `/effect @p minecraft:resistance 600 4`
+   - `/effect @p minecraft:fire_resistance 600 0`
+   - `/summon iceandfire:firedragon ~ ~ ~10 {AgeTicks:720000}`
+
+   The dragon is 30 days old, which is stage 2. Stage 3 and older dragons break blocks by walking and
+   flying through them, a path this mixin does not cover.
+3. Let it breathe fire at you (hit it once if it ignores you). Where the breath lands, no block is
+   charred and no fire appears.
+4. `logs\latest.log` shows
+   `[Medieval Times Mixins]: me.qourtenay.Civilizations.compat.DragonPolicy is present but does not have the expected methods. Dragon block protection will REFUSE all dragon block changes inside claims as a safe default ...`.
+   The message says "inside claims", but step 3 happened on unclaimed land.
+
+**Expected (fixed jar).** Same steps and same behaviour. Step 4 reads
+`... does not have the expected methods. Without the policy there is no way to tell claimed land from unclaimed, so dragons will be REFUSED every block change everywhere as a safe default, and dragon damage is left alone. ...`
+
+**Regression (same result on both jars).** Restore the normal Civilizations jar and remove the stub.
+- The same dragon on unclaimed land chars blocks. This shows the setup can show block changes.
+- The first such breath logs
+  `Dragon claim policy resolved from me.qourtenay.Civilizations.compat.DragonPolicy; ...`, as in your
+  log, line 2877.
+
+---
+
+## 5. Annotation processor warning on `MixinLootTableAttribution`
+
+**File:** `mixin/vanilla/MixinLootTableAttribution.java`
+
+**Defect.**
+- The `@Redirect` target is log4j's `Logger.warn`, which is not a Minecraft member.
+- The mixin is remapped, so the annotation processor looked for an obfuscation mapping, found none, and
+  warned
+  `Unable to locate method mapping for @At(INVOKE.<target>) 'Lorg/apache/logging/log4j/Logger;warn(Ljava/lang/String;)V'`.
+- The refmap had no entry for it, so the redirect fell back to the literal name and runtime behaviour
+  was already correct.
+
+**Fix.** `remap = false` on that `@At` only.
+
+**Reproduce.** In `tools\build-jars.ps1`'s output, the baseline build prints the warning. `main` does
+too.
+
+**Expected.** The fixed build prints no such warning.
+
+**Regression (both jars).** The redirect still applies. On a flat spot, without moving:
+1. Run `/setblock ~2 ~ ~2 minecraft:hopper`.
+2. Run these two commands as a pair, repeatedly (up-arrow twice, Enter):
+   `/blockdata ~2 ~ ~2 {LootTable:"minecraft:chests/simple_dungeon"}` and
+   `/replaceitem block ~2 ~ ~2 slot.container.0 minecraft:air`.
+3. When a roll yields more different items than the hopper has slots, the log shows
+   `Loot genuinely does not fit: N distinct stacks for 5 slots after merging (was M before). ...`
+   (N is 6 or more), followed by
+   `[Medieval Times Mixins]: Tried to over-fill a container -- table minecraft:chests/simple_dungeon | container net.minecraft.tileentity.TileEntityHopper size=5 alreadyUsed=0 | called from ...`
+   instead of vanilla's bare line.
+
+---
+
+## 6. Offline check (no server)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\mixin-harness\run.ps1
+```
+
+**Requirements.**
+- A JDK 11 or newer. The script finds one or takes `-Jdk <JDK folder>`.
+- git, or `-BaselineDir <folder holding the baseline's src\main\java\com\novotimo\mtmixins>`.
+- Internet on the first run, to fetch 10 jars from Maven Central (pinned by SHA-1). Later runs are
+  offline.
+- A run takes about 20 seconds.
+
+**What it does.**
+- Compiles the mixins from `96cc13c` and from the working tree.
+- Applies each build with the real Mixin 0.8.7 transformer and MixinExtras 0.5.5 (the version
+  MixinBooter 11.16 loads on your server).
+- The targets are stand-in classes that copy the method shapes of the real ones. Each fix gets a test.
+
+**Pass criteria.**
+- Every bug check shows `before FAIL / after PASS`.
+- Every regression check shows `PASS / PASS`.
+- The output ends with
+  `RESULT: every bug reproduces on the baseline, is fixed on the working tree, and nothing regressed.`
+- The exit code is 0 only in that case.
+
+The version, DragonBridge and annotation-processor fixes are not covered; sections 3–5 test them
+directly. The harness still contains the B18, B15, B2b and B13 checks.
