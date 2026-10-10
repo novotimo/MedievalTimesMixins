@@ -86,6 +86,11 @@ dependencies {
     // EntityDragonBase without it. Mixin checks appended target parameters for an exact type match,
     // so the real class is unavoidable here.
     compileOnly fileTree(dir: 'libs', include: ['iceandfire-*.jar', 'llibrary-*.jar'])
+
+    // Ancient Warfare, the jar the server runs. Needed by mixin/ancientwarfare/MixinNpcCombatEquipment
+    // (register B23), which applies NpcCombat's own role tests and so names AWCoreStatics,
+    // ItemCommandBaton, NpcBase and Owner. compileOnly, so nothing ships.
+    compileOnly fileTree(dir: 'libs', include: ['ancientwarfare-*.jar'])
 }
 
 processResources {
@@ -138,6 +143,9 @@ jar {
                         // dropped valid faces. Server only (Dynmap is not in the pack); its own file
                         // so the map fix can be switched off without a rebuild.
                         "mixins.${project.mod_id}.dynmap.json",
+                        // Register B23. Ancient Warfare combat NPCs picking up junk and printing about
+                        // it several times a second. Its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.awcombat.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
