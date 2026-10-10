@@ -134,6 +134,10 @@ jar {
                         // from config/mixinbooter.cfg without a rebuild, which matters because it
                         // can only be exercised on the live server.
                         "mixins.${project.mod_id}.dragonpolicy.json",
+                        // Register B22. Dynmap's model-face check measured the wrong corners and
+                        // dropped valid faces. Server only (Dynmap is not in the pack); its own file
+                        // so the map fix can be switched off without a rebuild.
+                        "mixins.${project.mod_id}.dynmap.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
