@@ -27,7 +27,7 @@ public final class MedievalTimesMixins {
      * Must match {@code mod_version} in gradle.properties. FML takes the version from this annotation
      * value, not from mcmod.info, so this is what the mod list, the handshake and crash reports show.
      */
-    public static final String VERSION = "0.2.0";
+    public static final String VERSION = "0.2.1";
 
     public static final Logger LOG = LogManager.getLogger(NAME);
 
