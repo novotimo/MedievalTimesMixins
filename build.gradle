@@ -91,6 +91,11 @@ dependencies {
     // (register B23), which applies NpcCombat's own role tests and so names AWCoreStatics,
     // ItemCommandBaton, NpcBase and Owner. compileOnly, so nothing ships.
     compileOnly fileTree(dir: 'libs', include: ['ancientwarfare-*.jar'])
+
+    // ForgeEssentials, the server jar prod runs. Needed by mixin/forgeessentials/MixinRespawnHandlerFirstJoin
+    // (register B24), whose redirect handler takes FE's WarpPoint as its receiver. compileOnly, so
+    // nothing ships, and FE is server-only, so that mixin is in the "server" section of its config.
+    compileOnly fileTree(dir: 'libs', include: ['forgeessentials-*.jar'])
 }
 
 processResources {
@@ -146,6 +151,11 @@ jar {
                         // Register B23. Ancient Warfare combat NPCs picking up junk and printing about
                         // it several times a second. Its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.awcombat.json",
+                        // Register B24. ForgeEssentials moved each new player to the Spawn world in the
+                        // middle of their login, which left the player flagged dead for their whole
+                        // first session (NPCs vanish, trades do nothing). Server only; its own file
+                        // so it can be switched off without a rebuild.
+                        "mixins.${project.mod_id}.firstjoin.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
