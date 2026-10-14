@@ -168,6 +168,10 @@ jar {
                         // dimension (including /spawn) and at every restart. Sets riders down first.
                         // Server only; its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.shoulderriders.json",
+                        // Register B28. A carried baby dragon dropped back where it was picked up,
+                        // because the server kept a stale dismount bit. Backports Ice and Fire's own
+                        // unreleased fix. Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.shoulderdismount.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.

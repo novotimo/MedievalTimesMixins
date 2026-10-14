@@ -40,9 +40,11 @@ public final class ShoulderRiders {
                         .append(' ').append(rider.getUniqueID())
                         .append(rider.isRiding() ? " (STILL RIDING)" : "");
             }
+            // The world's dimension, not player.dimension: transferPlayerToDimension sets that to the
+            // destination before it removes the player from the old world.
             MedievalTimesMixins.LOG.info(
                     "Register B27: set down {} riding {} in dimension {} at {},{},{} {}: {}",
-                    riders.size(), player.getName(), player.dimension,
+                    riders.size(), player.getName(), player.world.provider.getDimension(),
                     (int) Math.floor(player.posX), (int) Math.floor(player.posY), (int) Math.floor(player.posZ),
                     why, names);
         } catch (Throwable t) {
