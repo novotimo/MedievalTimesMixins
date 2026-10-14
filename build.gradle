@@ -96,6 +96,10 @@ dependencies {
     // (register B24), whose redirect handler takes FE's WarpPoint as its receiver. compileOnly, so
     // nothing ships, and FE is server-only, so that mixin is in the "server" section of its config.
     compileOnly fileTree(dir: 'libs', include: ['forgeessentials-*.jar'])
+
+    // Corpse 1.12.2-1.0.8, the jar the server runs (and the last 1.12.2 build). Needed by mixin/corpse
+    // (register B29), whose handlers take Corpse's message and Death types. compileOnly, so nothing ships.
+    compileOnly fileTree(dir: 'libs', include: ['corpse-*.jar'])
 }
 
 processResources {
@@ -172,6 +176,14 @@ jar {
                         // because the server kept a stale dismount bit. Backports Ice and Fire's own
                         // unreleased fix. Server only; its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.shoulderdismount.json",
+                        // Register B29. Corpse's death-history Items button opened the window on the
+                        // wrong player and read only the current world's deaths folder, so it never
+                        // worked for staff. Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.corpse.json",
+                        // Register B30. Corpse's client handlers opened the death history on the network
+                        // thread, which raced JEI and dropped the connection. Client only, so it reaches
+                        // players through the pack; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.corpseclient.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
