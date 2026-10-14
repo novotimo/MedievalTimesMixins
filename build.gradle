@@ -156,6 +156,18 @@ jar {
                         // first session (NPCs vanish, trades do nothing). Server only; its own file
                         // so it can be switched off without a rebuild.
                         "mixins.${project.mod_id}.firstjoin.json",
+                        // Register B25. A knockback with no direction made a player's position NaN,
+                        // which kicked them on every login. Fixes the knockback, rescues any player
+                        // whose position still goes non-finite, and repairs NaN saves on load. Its own
+                        // file so it can be switched off without a rebuild.
+                        "mixins.${project.mod_id}.nanguard.json",
+                        // Register B26. ForgeEssentials crashed the server saving a NaN location on
+                        // logout. Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.fesave.json",
+                        // Register B27. A baby dragon on a player's shoulder was lost on any change of
+                        // dimension (including /spawn) and at every restart. Sets riders down first.
+                        // Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.shoulderriders.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
