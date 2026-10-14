@@ -184,6 +184,14 @@ jar {
                         // thread, which raced JEI and dropped the connection. Client only, so it reaches
                         // players through the pack; its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.corpseclient.json",
+                        // Register B31. Corpses put inside the bedrock floor (or the End's void) after a
+                        // void death, sliding away after an explosion or in water, or carried off through
+                        // a portal. Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.corpsebody.json",
+                        // Register B32. A corpse removed itself while being looted, its window never
+                        // closed, and a second body on the same block could not be opened. Server, plus a
+                        // cosmetic client half; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.corpseloot.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
