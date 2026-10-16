@@ -100,6 +100,13 @@ dependencies {
     // Corpse 1.12.2-1.0.8, the jar the server runs (and the last 1.12.2 build). Needed by mixin/corpse
     // (register B29), whose handlers take Corpse's message and Death types. compileOnly, so nothing ships.
     compileOnly fileTree(dir: 'libs', include: ['corpse-*.jar'])
+
+    // Electroblob's Wizardry 4.3.15 and Baubles 1.12-1.5.2, the jars the server runs. Needed by
+    // mixin/ancientspellcraft/MixinPacketActivateBauble (register B34): its handler takes Wizardry's
+    // ItemArtefact.Type (Mixin wants the exact type) and moves the artefact through the Baubles API.
+    // AncientSpellcraft itself is not needed; that mixin names its target by string. compileOnly, so
+    // nothing ships.
+    compileOnly fileTree(dir: 'libs', include: ['ElectroblobsWizardry-*.jar', 'Baubles-*.jar'])
 }
 
 processResources {
@@ -192,6 +199,21 @@ jar {
                         // closed, and a second body on the same block could not be opened. Server, plus a
                         // cosmetic client half; its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.corpseloot.json",
+                        // Register B33. Ancient Warfare faction traders read the shift key through a
+                        // client class and never opened on the server; player-owned traders took payment
+                        // for trades their backpack could not fill. Its own file so it can be switched off
+                        // alone.
+                        "mixins.${project.mod_id}.awtrade.json",
+                        // Register B34. AncientSpellcraft's charm and ring keybind called the client's
+                        // Minecraft class on the server, and wrote rings back to the wrong slot. Its own
+                        // file so it can be switched off alone.
+                        "mixins.${project.mod_id}.asbauble.json",
+                        // Register B35. JEI 4.16.5 removes duplicate recipes with equals/hashCode, and
+                        // Horse Power's press wrapper threw on its fluid recipes (null item output),
+                        // crashing the client at startup. Gives it a correct equals and hashCode. Client
+                        // only, so it reaches players through the pack; its own file so it can be
+                        // switched off alone.
+                        "mixins.${project.mod_id}.horsepowerjei.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
