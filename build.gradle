@@ -224,6 +224,12 @@ jar {
                         // now weigh a quarter of a chat message. Server only; its own file so it can be
                         // switched off alone.
                         "mixins.${project.mod_id}.commandspam.json",
+                        // Register B38. Ice and Fire saves dragons even when dead, so a stale dragon
+                        // record in the wrong chunk was killed on every load and written back on every
+                        // save. Only dragons vanilla killed for being in the wrong chunk stop being
+                        // saved (corpses and riders are untouched); tamed ones are backed up to a file
+                        // first. Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.dragonsave.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
