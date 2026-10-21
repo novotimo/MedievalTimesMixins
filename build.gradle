@@ -214,6 +214,11 @@ jar {
                         // only, so it reaches players through the pack; its own file so it can be
                         // switched off alone.
                         "mixins.${project.mod_id}.horsepowerjei.json",
+                        // Register B36. Signs saved while Redstone++'s sign module was on carry the id
+                        // minecraft:sign_fix; with the module off vanilla skipped them and the text was
+                        // lost on the next save. Renames the id to minecraft:sign as the chunk loads.
+                        // Its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.signfix.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
