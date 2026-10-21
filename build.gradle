@@ -230,6 +230,11 @@ jar {
                         // saved (corpses and riders are untouched); tamed ones are backed up to a file
                         // first. Server only; its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.dragonsave.json",
+                        // Register B39. Ancient Warfare's team check at login removed teams from the set it
+                        // was looping over, so a player who had left two or more teams was thrown off with
+                        // "Internal server error". The loop now walks a copy. Server only; its own file so
+                        // it can be switched off alone.
+                        "mixins.${project.mod_id}.awteams.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
