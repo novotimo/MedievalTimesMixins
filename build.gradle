@@ -219,6 +219,11 @@ jar {
                         // lost on the next save. Renames the id to minecraft:sign as the chunk loads.
                         // Its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.signfix.json",
+                        // Register B37. Vanilla counted every command like a chat message toward the
+                        // spam kick, so a few /town deposits in a row disconnected the player. Commands
+                        // now weigh a quarter of a chat message. Server only; its own file so it can be
+                        // switched off alone.
+                        "mixins.${project.mod_id}.commandspam.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
