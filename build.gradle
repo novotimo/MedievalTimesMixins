@@ -235,6 +235,12 @@ jar {
                         // "Internal server error". The loop now walks a copy. Server only; its own file so
                         // it can be switched off alone.
                         "mixins.${project.mod_id}.awteams.json",
+                        // Register B40. Ancient Warfare NPCs searched a new path every tick while walking
+                        // (a retry delay decremented by 10 but set to 5), a quarter of prod's tick on
+                        // 2026-10-22. The delay now counts ticks, a path to the same block is kept, and
+                        // searches that get nowhere back off. Server only; its own file so it can be
+                        // switched off alone.
+                        "mixins.${project.mod_id}.awpathing.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
