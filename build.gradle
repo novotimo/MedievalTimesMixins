@@ -246,6 +246,11 @@ jar {
                         // config/mtmixins-farms.properties. Server only; its own file so it can be switched
                         // off alone.
                         "mixins.${project.mod_id}.farms.json",
+                        // Register B42. world/data files are no longer rewritten when unchanged; Forge marks
+                        // capabilities.dat (4.5 MB of Ancient Warfare territory data) dirty at every save, a
+                        // two-second freeze per autosave and per Lootr chest opening. Server only; its own
+                        // file so it can be switched off alone.
+                        "mixins.${project.mod_id}.saveddata.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
