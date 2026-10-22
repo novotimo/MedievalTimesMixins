@@ -241,6 +241,11 @@ jar {
                         // searches that get nowhere back off. Server only; its own file so it can be
                         // switched off alone.
                         "mixins.${project.mod_id}.awpathing.json",
+                        // Register B41. Farm limiter: animals in a chunk with more than 16 are updated every
+                        // few ticks instead of every tick, and breeding stops at 24 per chunk. Settings in
+                        // config/mtmixins-farms.properties. Server only; its own file so it can be switched
+                        // off alone.
+                        "mixins.${project.mod_id}.farms.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
