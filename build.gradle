@@ -290,6 +290,11 @@ jar {
                         // doubled it, up to 64. The drops are now copies. Server only; its own file so it
                         // can be switched off alone.
                         "mixins.${project.mod_id}.handpick.json",
+                        // Register B49. A MineFantasy handpick rolled random ore on every block its table
+                        // names, so a placed block that drops itself (chiselled stone, granite, dirt,
+                        // netherrack) was an endless ore farm. It now rolls only when the break does not give
+                        // the block back. Server only; its own file so it can be switched off without B48.
+                        "mixins.${project.mod_id}.handpickplaced.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
