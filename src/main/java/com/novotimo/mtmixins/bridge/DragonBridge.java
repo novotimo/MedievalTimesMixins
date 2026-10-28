@@ -123,6 +123,29 @@ public final class DragonBridge {
         }
     }
 
+    /**
+     * The same per-block claim policy for any other mob that changes blocks without posting an event
+     * (B50 sea serpents, B51 Lycanites building). It does not announce: only the breath mixin may tell
+     * Civilizations to stand its breath fallback down, and these registers live in their own files and can
+     * be on while that one is off.
+     *
+     * @return true if this mob may change this block. Fails closed when Civilizations is present.
+     */
+    public static boolean mobBlockChangeAllowed(Object world, Object pos, Object mob) {
+        if (!PRESENT) {
+            return true;
+        }
+        if (BLOCK_CHANGE_ALLOWED == null || broken) {
+            return false;
+        }
+        try {
+            return (Boolean)BLOCK_CHANGE_ALLOWED.invoke(null, world, pos, mob);
+        } catch (Throwable t) {
+            fail("blockChangeAllowed", t, "dragons and other mobs will be refused every block change, claimed or not");
+            return false;
+        }
+    }
+
     /** @return true if this dragon may hurt this victim. Fails open. */
     public static boolean damageAllowed(Object dragon, Object victim) {
         if (!PRESENT || DAMAGE_ALLOWED == null || broken) {

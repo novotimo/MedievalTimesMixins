@@ -295,6 +295,11 @@ jar {
                         // netherrack) was an endless ore farm. It now rolls only when the break does not give
                         // the block back. Server only; its own file so it can be switched off without B48.
                         "mixins.${project.mod_id}.handpickplaced.json",
+                        // Register B50. Ice and Fire's sea serpents broke plants and leaves with no event, so
+                        // they were the one Ice and Fire griefer claims did not stop. Each break now asks
+                        // Civilizations' DragonPolicy, like dragon breath. Server only; its own file so it
+                        // can be switched off alone.
+                        "mixins.${project.mod_id}.seaserpent.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
