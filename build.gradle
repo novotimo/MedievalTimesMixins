@@ -304,6 +304,10 @@ jar {
                         // cleared her pit blocks, with no event. Both now ask Civilizations' DragonPolicy per
                         // block. Server only; its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.lycanitesbuild.json",
+                        // Register B52. Items a creative player takes from the creative menu (not moves within
+                        // their own inventory) go to Civilizations' transparency log, which records commands
+                        // itself. Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.creativelog.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
