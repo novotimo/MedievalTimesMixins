@@ -262,6 +262,11 @@ jar {
                         // cannot open a crucible smelting an alloy they have not researched. Server only;
                         // its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.crucible.json",
+                        // Register B44. EntityDataManager.getEntry took a read lock around every read of an
+                        // entity's synced data, 4.5% of prod's server thread; the map only changes while the
+                        // entity is constructed (Spigot/Paper removed the same lock). Server only; its own
+                        // file so it can be switched off alone.
+                        "mixins.${project.mod_id}.datalock.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
