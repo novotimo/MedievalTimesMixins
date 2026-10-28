@@ -313,6 +313,11 @@ jar {
                         // their own inventory) go to Civilizations' transparency log, which records commands
                         // itself. Server only; its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.creativelog.json",
+                        // Register B54. Lootr's chest conversion failed in chunks Chunk Pregenerator holds (never
+                        // marked loaded, so the old tile entity could not be removed), leaving emptied chests that
+                        // never open. The old tile entity is now removed by hand there. Server only; its own file
+                        // so it can be switched off alone.
+                        "mixins.${project.mod_id}.lootrpregen.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
