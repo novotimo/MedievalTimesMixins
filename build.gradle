@@ -112,6 +112,11 @@ dependencies {
     // (mixin/minefantasy/MixinBlockCrucibleResearch and util/CrucibleResearch), which call the crucible,
     // its alloy recipes and MFR's research checks directly. compileOnly, so nothing ships.
     compileOnly fileTree(dir: 'libs', include: ['MineFantasyReforged-*.jar'])
+
+    // Serene Seasons 1.12.2-1.2.18-universal, the jar the server runs. Needed by register B45
+    // (mixin/sereneseasons/MixinBiomeHooksDirect), which overwrites its BiomeHooks API to call
+    // SeasonASMHelper directly. compileOnly, so nothing ships.
+    compileOnly fileTree(dir: 'libs', include: ['SereneSeasons-*.jar'])
 }
 
 processResources {
@@ -267,6 +272,10 @@ jar {
                         // entity is constructed (Spigot/Paper removed the same lock). Server only; its own
                         // file so it can be switched off alone.
                         "mixins.${project.mod_id}.datalock.json",
+                        // Register B45. Serene Seasons' BiomeHooks resolved its target by reflection on every
+                        // call, and Serene Tweaks' snow recalculation loaded neighbouring chunks through
+                        // vanilla's observer check. Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.serenetweaks.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
