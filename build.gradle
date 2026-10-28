@@ -280,6 +280,11 @@ jar {
                         // their own coordinates and loaded flag, so most block reads skip the chunk map (5.3%
                         // of prod's thread). Server only; its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.chunkcache.json",
+                        // Register B47. Ancient Warfare sized each candidate town by growing up to 33x33
+                        // chunks, generating every missing chunk it tested, then cut it to the template's
+                        // maxsize. The search now stops at the largest valid template's maxsize. Server only;
+                        // its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.awtowns.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
