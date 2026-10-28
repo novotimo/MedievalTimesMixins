@@ -1,13 +1,17 @@
 package com.novotimo.mtmixins;
 
+import com.novotimo.mtmixins.util.OwnClasses;
+
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
  * Container mod. The mixins themselves are registered from the {@code MixinConfigs}
- * manifest attribute, not from here, so this class exists only to give Forge something
- * to list and to declare the MixinBooter dependency.
+ * manifest attribute, not from here, so this class exists to give Forge something
+ * to list, to declare the MixinBooter dependency, and to preload the jar's classes
+ * ({@link OwnClasses}) so a jar uploaded over the running one cannot crash it.
  */
 @Mod(
         modid = MedievalTimesMixins.MOD_ID,
@@ -36,5 +40,10 @@ public final class MedievalTimesMixins {
     // accessible no-arg constructor or mod loading dies with:
     //   IllegalAccessException: ... can not access a member of ... with modifiers "private"
     public MedievalTimesMixins() {
+    }
+
+    @Mod.EventHandler
+    public void preInit(FMLPreInitializationEvent event) {
+        OwnClasses.preload(event.getSourceFile());
     }
 }
