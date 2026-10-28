@@ -285,6 +285,11 @@ jar {
                         // maxsize. The search now stops at the largest valid template's maxsize. Server only;
                         // its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.awtowns.json",
+                        // Register B48. A MineFantasy handpick dropped the stack held in its random-ore
+                        // table, not a copy, so drops lying together merged into the same object and
+                        // doubled it, up to 64. The drops are now copies. Server only; its own file so it
+                        // can be switched off alone.
+                        "mixins.${project.mod_id}.handpick.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
