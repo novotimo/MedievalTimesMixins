@@ -300,6 +300,10 @@ jar {
                         // Civilizations' DragonPolicy, like dragon breath. Server only; its own file so it
                         // can be switched off alone.
                         "mixins.${project.mod_id}.seaserpent.json",
+                        // Register B51. Lycanites vespids built hives over solid blocks, and a dying queen
+                        // cleared her pit blocks, with no event. Both now ask Civilizations' DragonPolicy per
+                        // block. Server only; its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.lycanitesbuild.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
