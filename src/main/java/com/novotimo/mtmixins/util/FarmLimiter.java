@@ -1,6 +1,7 @@
 package com.novotimo.mtmixins.util;
 
 import com.novotimo.mtmixins.MedievalTimesMixins;
+import com.novotimo.mtmixins.bridge.FrozenBridge;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -40,8 +41,9 @@ import net.minecraft.util.ClassInheritanceMultiMap;
  *       update only every Nth tick, N = animals / above rounded up, at most {@code throttle-max-stride}. A
  *       packed chunk then costs about what {@code throttle-above} animals cost. On the ticks it skips, a baby
  *       still grows and a breeding cooldown still counts down, so only movement and reactions slow down.
- *       Animals that are hurt, burning, in water, airborne, ridden, riding, leashed, dying, in love or (by
- *       default) named always get every tick.</li>
+ *       Animals that are hurt, burning, in water, airborne, ridden, riding, leashed, dying, in love, under a
+ *       potion effect, frozen by Ice and Fire ({@link FrozenBridge}) or (by default) named always get every
+ *       tick, because those all count down in the update a skipped tick does not run.</li>
  *   <li><b>Breeding cap.</b> In a chunk that already has {@code breeding-limit-per-chunk} animals, feeding
  *       an adult its breeding food is refused (the item is kept) with a message, and a pair that was already
  *       in love does not give birth (both go on the usual 5-minute cooldown, as when another mod cancels a
@@ -131,7 +133,14 @@ public final class FarmLimiter {
                 Entity entity = entities.get(i);
                 if (entity instanceof EntityAnimal) {
                     int[] n = counts((EntityAnimal) entity) ? perChunk.get(chunkKey(entity)) : null;
-                    ((Crowded) entity).mtmixins$setFarmCrowd(n == null ? 0 : n[0]);
+                    int crowd = n == null ? 0 : n[0];
+                    // Still counted for its neighbours, but never throttled itself while Ice and Fire has it
+                    // frozen: the thaw counts down in an event a skipped tick does not fire.
+                    if (crowd > throttleAbove && FrozenBridge.isFrozen(entity)) {
+                        crowd = 0;
+                    }
+
+                    ((Crowded) entity).mtmixins$setFarmCrowd(crowd);
                 }
             }
 
@@ -191,6 +200,8 @@ public final class FarmLimiter {
                 || animal.isBeingRidden()
                 || animal.getLeashed()
                 || animal.isInLove()
+                // Potion effects count down in the update a skipped tick does not run.
+                || !animal.getActivePotionEffects().isEmpty()
                 || (throttleExemptNamed && animal.hasCustomName());
     }
 
