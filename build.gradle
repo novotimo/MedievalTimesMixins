@@ -107,6 +107,11 @@ dependencies {
     // AncientSpellcraft itself is not needed; that mixin names its target by string. compileOnly, so
     // nothing ships.
     compileOnly fileTree(dir: 'libs', include: ['ElectroblobsWizardry-*.jar', 'Baubles-*.jar'])
+
+    // MineFantasy Reforged 1.12.2-0.3.9, the jar the server runs. Needed by register B43
+    // (mixin/minefantasy/MixinBlockCrucibleResearch and util/CrucibleResearch), which call the crucible,
+    // its alloy recipes and MFR's research checks directly. compileOnly, so nothing ships.
+    compileOnly fileTree(dir: 'libs', include: ['MineFantasyReforged-*.jar'])
 }
 
 processResources {
@@ -251,6 +256,12 @@ jar {
                         // two-second freeze per autosave and per Lootr chest opening. Server only; its own
                         // file so it can be switched off alone.
                         "mixins.${project.mod_id}.saveddata.json",
+                        // Register B43. A MineFantasy crucible smelted with the research of whoever last
+                        // right-clicked it, so a less researched player opening it stopped another player's
+                        // batch. The research now comes from the players who load the batch, and a player
+                        // cannot open a crucible smelting an alloy they have not researched. Server only;
+                        // its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.crucible.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
