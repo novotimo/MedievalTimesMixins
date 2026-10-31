@@ -318,6 +318,11 @@ jar {
                         // never open. The old tile entity is now removed by hand there. Server only; its own file
                         // so it can be switched off alone.
                         "mixins.${project.mod_id}.lootrpregen.json",
+                        // Register B55. Chunk Pregenerator trimmed the region file cache from its own thread
+                        // without the cache's lock, so a dimension unload during a pregen crashed the server
+                        // (ConcurrentModificationException in RegionFileCache.clearRegionFileReferences). Its
+                        // map access now takes that lock. Its own file so it can be switched off alone.
+                        "mixins.${project.mod_id}.pregenlock.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
