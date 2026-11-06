@@ -117,6 +117,11 @@ dependencies {
     // (mixin/sereneseasons/MixinBiomeHooksDirect), which overwrites its BiomeHooks API to call
     // SeasonASMHelper directly. compileOnly, so nothing ships.
     compileOnly fileTree(dir: 'libs', include: ['SereneSeasons-*.jar'])
+
+    // CustomNPCs 1.12.2 (05Jul20), the jar the server runs, copied to libs/ as CustomNPCs_1.12.2-05Jul20.jar
+    // (no brackets). Needed by registers B56 and B57 (mixin/customnpcs), which shadow ContainerNPCTrader's
+    // role and call NoppesUtilPlayer. compileOnly, so nothing ships.
+    compileOnly fileTree(dir: 'libs', include: ['CustomNPCs_*.jar'])
 }
 
 processResources {
@@ -323,6 +328,15 @@ jar {
                         // (ConcurrentModificationException in RegionFileCache.clearRegionFileReferences). Its
                         // map access now takes that lock. Its own file so it can be switched off alone.
                         "mixins.${project.mod_id}.pregenlock.json",
+                        // Register B56. Shift-clicking a CustomNPCs trade repeats it until the player cannot pay,
+                        // the result will not fit or 1,000 trades; goods go into the inventory and coin payouts
+                        // are paid once, in the highest denominations, through Civilizations. Server only; its own
+                        // file so it can be switched off alone.
+                        "mixins.${project.mod_id}.cnpcbulk.json",
+                        // Register B57. A CustomNPCs price in coins is a value: any coins of that worth pay it,
+                        // with change in the highest denominations, through Civilizations. Server only; its own
+                        // file so it can be switched off alone.
+                        "mixins.${project.mod_id}.cnpccoins.json",
                         // Diagnostic only - names the container that over-filled, because vanilla's
                         // own warning does not. Delete this entry and the file once the cause is
                         // found; it is not meant to live on a production server indefinitely.
